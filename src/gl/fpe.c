@@ -1,14 +1,17 @@
 #include "fpe.h"
-#include "fpe_shader.h"
-#include "gl.h"
+
 #include "../glx/hardext.h"
+#include "array.h"
+#include "debug.h"
+#include "enum_info.h"
+#include "fpe_shader.h"
+#include "glcase.h"
+#include "init.h"
+#include "loader.h"
 #include "matrix.h"
 #include "matvec.h"
 #include "program.h"
 #include "shaderconv.h"
-#include "debug.h"
-#include "array.h"
-#include "init.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -17,6 +20,9 @@
 #else
 #define DBG(a)
 #endif
+
+KHASH_MAP_IMPL_INT(fpecachelist, fpe_cache_t *);
+
 
 // ********* Cache handling *********
 
@@ -53,7 +59,6 @@ void fpe_disposeCache(fpe_cache_t* cache, int freeprog) {
             fpe_disposeCache(m, freeprog); free(m);
         )
         kh_destroy(fpecachelist, cache->cache);
-        free(cache->cache);
         cache->cache = NULL;
     }
 }
@@ -248,6 +253,8 @@ void fpe_program(int ispoint) {
         glstate->fpe = fpe_GetCache(glstate->fpe_cache, &state, 1);
     }   
     if(glstate->fpe->glprogram==NULL) {
+        LOAD_GLES2(glGetShaderInfoLog);
+        LOAD_GLES2(glGetProgramInfoLog);
         GLint status;
         glstate->fpe->vert = gl4es_glCreateShader(GL_VERTEX_SHADER);
         gl4es_glShaderSource(glstate->fpe->vert, 1, fpe_VertexShader(glstate->fpe_state), NULL);
@@ -255,8 +262,8 @@ void fpe_program(int ispoint) {
         gl4es_glGetShaderiv(glstate->fpe->vert, GL_COMPILE_STATUS, &status);
         if(status!=GL_TRUE) {
             char buff[1000];
-            gl4es_glGetShaderInfoLog(glstate->fpe->vert, 1000, NULL, buff);
-            if(globals4es.comments)
+            gles_glGetShaderInfoLog(glstate->fpe->vert, 1000, NULL, buff);
+            if(globals4es.logshader)
                 printf("LIBGL: FPE Vertex shader compile failed: source is\n%s\n\nError is: %s\n", fpe_VertexShader(glstate->fpe_state)[0], buff);
             else
                 printf("LIBGL: FPE Vertex shader compile failed: %s\n", buff);
@@ -267,8 +274,8 @@ void fpe_program(int ispoint) {
         gl4es_glGetShaderiv(glstate->fpe->frag, GL_COMPILE_STATUS, &status);
         if(status!=GL_TRUE) {
             char buff[1000];
-            gl4es_glGetShaderInfoLog(glstate->fpe->frag, 1000, NULL, buff);
-            if(globals4es.comments)
+            gles_glGetShaderInfoLog(glstate->fpe->frag, 1000, NULL, buff);
+            if(globals4es.logshader)
                 printf("LIBGL: FPE Fragment shader compile failed: source is\n%s\n\nError is: %s\n", fpe_FragmentShader(glstate->fpe_state)[0], buff);
             else
                 printf("LIBGL: FPE Fragment shader compile failed: %s\n", buff);
@@ -280,8 +287,12 @@ void fpe_program(int ispoint) {
         gl4es_glGetProgramiv(glstate->fpe->prog, GL_LINK_STATUS, &status);
         if(status!=GL_TRUE) {
             char buff[1000];
-            gl4es_glGetProgramInfoLog(glstate->fpe->prog, 1000, NULL, buff);
-            printf("LIBGL: FPE Program link failed: %s\n", buff);
+            gles_glGetProgramInfoLog(glstate->fpe->prog, 1000, NULL, buff);
+            if(globals4es.logshader) {
+                printf("LIBGL: FPE Program link failed: source of vertex shader is\n%s\n\n", fpe_VertexShader(glstate->fpe_state)[0]);
+                printf("source of fragment shader is \n%s\n\nError is: %s\n", fpe_FragmentShader(glstate->fpe_state)[0], buff);
+            } else
+                printf("LIBGL: FPE Program link failed: %s\n", buff);
         }
         // now find the program
         khint_t k_program;
@@ -299,7 +310,7 @@ void fpe_program(int ispoint) {
 
 program_t* fpe_CustomShader(program_t* glprogram, fpe_state_t* state)
 {
-    // state is not empty and glprogram already has some cache (it may be empty, but khthingy is initialized)
+    // state is not empty and glprogram already has some cache (it may be empty, but kh'thingy is initialized)
     // TODO: what if program is composed of more then 1 vertex or fragment shader?
     fpe_fpe_t *fpe = fpe_GetCache((fpe_cache_t*)glprogram->fpe_cache, state, 0);
     if(fpe->glprogram==NULL) {
@@ -327,6 +338,14 @@ program_t* fpe_CustomShader(program_t* glprogram, fpe_state_t* state)
         fpe->prog = gl4es_glCreateProgram();
         gl4es_glAttachShader(fpe->prog, fpe->vert);
         gl4es_glAttachShader(fpe->prog, fpe->frag);
+        // re-run the BindAttribLocation if any
+        {
+            attribloc_t *al;
+            LOAD_GLES2(glBindAttribLocation);   // using real one to avoid overwriting of attribloc...
+            kh_foreach_value(glprogram->attribloc, al,
+                gles_glBindAttribLocation(fpe->prog, al->index, al->name);
+            );
+        }
         gl4es_glLinkProgram(fpe->prog);
         gl4es_glGetProgramiv(fpe->prog, GL_LINK_STATUS, &status);
         if(status!=GL_TRUE) {
@@ -367,13 +386,16 @@ program_t* fpe_CustomShader(program_t* glprogram, fpe_state_t* state)
     return fpe->glprogram;
 }
 
-void fpe_SyncUniforms(uniformcache_t *cache, khash_t(uniformlist) *uniforms, program_t* glprogram) {
+void fpe_SyncUniforms(uniformcache_t *cache, program_t* glprogram) {
     //TODO: Optimize this...
+    khash_t(uniformlist) *uniforms = glprogram->uniform;
     uniform_t *m;
     khint_t k;
+    DBG(int cnt = 0;)
     // don't use m->size, as each element has it's own uniform...
     kh_foreach(uniforms, k, m,
         if(m->parent_size) {
+            DBG(++cnt;)
             switch(m->type) {
                 case GL_FLOAT:
                 case GL_FLOAT_VEC2:
@@ -381,6 +403,8 @@ void fpe_SyncUniforms(uniformcache_t *cache, khash_t(uniformlist) *uniforms, pro
                 case GL_FLOAT_VEC4:
                     GoUniformfv(glprogram, m->id, n_uniform(m->type), 1, (GLfloat*)((uintptr_t)cache->cache+m->parent_offs));
                     break;
+                case GL_SAMPLER_2D:
+                case GL_SAMPLER_CUBE:
                 case GL_INT:
                 case GL_INT_VEC2:
                 case GL_INT_VEC3:
@@ -400,15 +424,17 @@ void fpe_SyncUniforms(uniformcache_t *cache, khash_t(uniformlist) *uniforms, pro
                 case GL_FLOAT_MAT4:
                     GoUniformMatrix4fv(glprogram, m->id, 1, false, (GLfloat*)((uintptr_t)cache->cache+m->parent_offs));
                     break;
+                default:
+                    printf("LIBGL: Warning, sync uniform on father/son program with unknown uniform type %s\n", PrintEnum(m->type));
             }
         }
     );
+    DBG(printf("Uniform sync'd with %d and father (%d uniforms)\n", glprogram->id, cnt);)
 }
 // ********* Fixed Pipeling function wrapper *********
 
 void fpe_glClientActiveTexture(GLenum texture) {
     DBG(printf("fpe_glClientActiveTexture(%s)\n", PrintEnum(texture));)
-    glstate->fpe_client.client = texture - GL_TEXTURE0;
 }
 
 void fpe_EnableDisableClientState(GLenum cap, GLboolean val) {
@@ -423,7 +449,7 @@ void fpe_EnableDisableClientState(GLenum cap, GLboolean val) {
             glstate->fpe_client.normal_array = val;
             break;
         case GL_TEXTURE_COORD_ARRAY:
-            glstate->fpe_client.tex_coord_array[glstate->fpe_client.client] = val;
+            glstate->fpe_client.tex_coord_array[glstate->texture.client] = val;
             break;
         case GL_SECONDARY_COLOR_ARRAY:
             glstate->fpe_client.secondary_array = val;
@@ -480,11 +506,11 @@ void fpe_glNormalPointer(GLenum type, GLsizei stride, const GLvoid *pointer) {
 }
 
 void fpe_glTexCoordPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *pointer) {
-    DBG(printf("fpe_glTexCoordPointer(%d, %s, %d, %p) on tmu=%d\n", size, PrintEnum(type), stride, pointer, glstate->fpe_client.client);)
-    glstate->fpe_client.tex[glstate->fpe_client.client].size = size;
-    glstate->fpe_client.tex[glstate->fpe_client.client].type = type;
-    glstate->fpe_client.tex[glstate->fpe_client.client].stride = stride;
-    glstate->fpe_client.tex[glstate->fpe_client.client].pointer = pointer;
+    DBG(printf("fpe_glTexCoordPointer(%d, %s, %d, %p) on tmu=%d\n", size, PrintEnum(type), stride, pointer, glstate->texture.client);)
+    glstate->fpe_client.tex[glstate->texture.client].size = size;
+    glstate->fpe_client.tex[glstate->texture.client].type = type;
+    glstate->fpe_client.tex[glstate->texture.client].stride = stride;
+    glstate->fpe_client.tex[glstate->texture.client].pointer = pointer;
 }
 
 void fpe_glFogCoordPointer(GLenum type, GLsizei stride, const GLvoid *pointer) {
@@ -512,16 +538,20 @@ void fpe_glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz) {
 
 void fpe_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
     DBG(printf("fpe_glDrawArrays(%s, %d, %d), program=%d, instanceID=%u\n", PrintEnum(mode), first, count, glstate->glsl->program, glstate->instanceID);)
-    realize_glenv(mode==GL_POINTS);
+    void* scratch = NULL;
+    realize_glenv(mode==GL_POINTS, first, count, 0, NULL, &scratch);
     LOAD_GLES(glDrawArrays);
     gles_glDrawArrays(mode, first, count);
+    if(scratch) free(scratch);
 }
 
 void fpe_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
     DBG(printf("fpe_glDrawElements(%s, %d, %s, %p), program=%d, instanceID=%u\n", PrintEnum(mode), count, PrintEnum(type), indices, glstate->glsl->program, glstate->instanceID);)
-    realize_glenv(mode==GL_POINTS);
+    void* scratch = NULL;
+    realize_glenv(mode==GL_POINTS, 0, count, type, indices, &scratch);
     LOAD_GLES(glDrawElements);
     gles_glDrawElements(mode, count, type, indices);
+    if(scratch) free(scratch);
 }
 
 void fpe_glMatrixMode(GLenum mode) {
@@ -605,7 +635,9 @@ int fpe_gettexture(int TMU) {
     return target;
 }
 
-void realize_glenv(int ispoint) {
+void realize_glenv(int ispoint, int first, int count, GLenum type, const void* indices, void** scratch) {
+    // the handling of GL_BGRA size of GL_DOUBLE using 1 scratch in not ideal, and a waste when dealing with Buffers
+    // TODO: have the scratch buffer part of the VBO, and tag it dirty when buffer is changed (or always dirty for VBO 0)
     if(hardext.esversion==1) return;
     LOAD_GLES2(glUseProgram);
     // update texture state for fpe only
@@ -613,7 +645,7 @@ void realize_glenv(int ispoint) {
         for(int i=0; i<glstate->fpe_bound_changed; i++) {
             glstate->fpe_state->texformat &= ~(7<<(i*3));
             glstate->fpe_state->texadjust &= ~(1<<i);
-            // disable texture unit, in that case (binded texture is not valid)
+            // disable texture unit, in that case (binded texture iconsts not valid)
             glstate->fpe_state->textype &= ~(7<<(i*3));
             int texunit = fpe_gettexture(i);
             gltexture_t* tex = (texunit==-1)?NULL:glstate->texture.bound[i][texunit];
@@ -651,12 +683,9 @@ void realize_glenv(int ispoint) {
             DBG(printf("GLSL program %d need customization => ", program);)
             if(!glprogram->fpe_cache)
                 glprogram->fpe_cache = fpe_NewCache();
-            glprogram = fpe_CustomShader(glprogram, &state);
+            glprogram = fpe_CustomShader(glprogram, &state);    // fetch from cache if exist or create it
             program = glprogram->id;
             DBG(printf("%d\n", program);)
-            // synchronize uniforms with parent!
-            if(glprogram != glstate->glsl->glprogram)
-                fpe_SyncUniforms(&glstate->glsl->glprogram->cache, glprogram->uniform, glprogram);
         }
         if(glstate->gleshard->program != program)
         {
@@ -665,6 +694,9 @@ void realize_glenv(int ispoint) {
             gles_glUseProgram(glstate->gleshard->program);
             DBG(printf("Use GLSL program %d\n", glstate->gleshard->program);)
         }
+        // synchronize uniforms with parent!
+        if(glprogram != glstate->glsl->glprogram)
+            fpe_SyncUniforms(&glstate->glsl->glprogram->cache, glprogram);
     } else {
         fpe_program(ispoint);
         if(glstate->gleshard->program != glstate->fpe->prog)
@@ -676,15 +708,49 @@ void realize_glenv(int ispoint) {
         }
     }
     program_t *glprogram = glstate->gleshard->glprogram;
+    // Texture Unit managements
+    int need_hackfbo = 0;
+    int tu_idx = 0;
+    while(tu_idx<MAX_TEX && glprogram->texunits[tu_idx].type) {
+        // grab the uniform value
+        glprogram->texunits[tu_idx].req_tu = GetUniformi(glprogram, glprogram->texunits[tu_idx].id);
+        glprogram->texunits[tu_idx].act_tu = glprogram->texunits[tu_idx].req_tu;
+        ++tu_idx;
+    }
+    if(globals4es.fbounbind && glstate->fbo.current_fb->id) {
+        // check if need to unbind/bind fbo because texture is both attached and used
+        tu_idx = 0;
+        int need = 0;
+        gltexture_t * tex = NULL;
+        while(tu_idx<MAX_TEX && glprogram->texunits[tu_idx].type && !need) {
+            tex = glstate->texture.bound[glprogram->texunits[tu_idx].req_tu][glprogram->texunits[tu_idx].type - 1];
+            if(tex && tex->binded_fbo==glstate->fbo.current_fb->id) {
+                DBG(printf("Texture %d is used on Uniform %s (%d) and binded on FBO %d Attachement=%s\n", tex->glname, GetUniformName(glprogram, glprogram->texunits[tu_idx].id), glprogram->texunits[tu_idx].id, glstate->fbo.current_fb->id, PrintEnum(tex->binded_attachment));)
+                need = 1;
+            }
+            ++tu_idx;
+        }
+        if(need && tex) {
+            DBG(printf("LIBGL: Need to Bind/Unbind FBO!");)
+            LOAD_GLES2_OR_OES(glBindFramebuffer);
+            LOAD_GLES2_OR_OES(glFramebufferTexture2D);
+            //gles_glFramebufferTexture2D(GL_FRAMEBUFFER, tex->binded_attachment, GL_TEXTURE_2D, 0, 0);
+            gles_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.current_fb->id);
+            //gles_glFramebufferTexture2D(GL_FRAMEBUFFER, tex->binded_attachment, GL_TEXTURE_2D, tex->glname, 0);
+        }
+    }
     // setup fixed pipeline builtin vertex attrib if needed
+    vertexattrib_t  wanted[MAX_VATTRIB];
     if(glprogram->has_builtin_attrib)
     {
+        memcpy(wanted, glstate->glesva.wanted, sizeof(wanted));
         int vaarray = 0;
         int id = -1;
         // Vertex
         id = glprogram->builtin_attrib[ATT_VERTEX];
         if(id!=-1) {
-            vertexattrib_t *w = &glstate->glesva.wanted[id];
+            vertexattrib_t *w = &wanted[id];
             pointer_state_t *p = &glstate->fpe_client.vert;
             w->vaarray = glstate->fpe_client.vertex_array;
             if(w->vaarray) {
@@ -701,7 +767,7 @@ void realize_glenv(int ispoint) {
         // Color
         id = glprogram->builtin_attrib[ATT_COLOR];
         if(id!=-1) {
-            vertexattrib_t *w = &glstate->glesva.wanted[id];
+            vertexattrib_t *w = &wanted[id];
             pointer_state_t *p = &glstate->fpe_client.color;
             w->vaarray = glstate->fpe_client.color_array;
             if(w->vaarray) {
@@ -718,7 +784,7 @@ void realize_glenv(int ispoint) {
         // Secondary Color
         id = glprogram->builtin_attrib[ATT_SECONDARY];
         if(id!=-1) {
-            vertexattrib_t *w = &glstate->glesva.wanted[id];
+            vertexattrib_t *w = &wanted[id];
             pointer_state_t *p = &glstate->fpe_client.secondary;
             w->vaarray = glstate->fpe_client.secondary_array;
             if(w->vaarray) {
@@ -735,7 +801,7 @@ void realize_glenv(int ispoint) {
         // Fog Coord
         id = glprogram->builtin_attrib[ATT_FOGCOORD];
         if(id!=-1) {
-            vertexattrib_t *w = &glstate->glesva.wanted[id];
+            vertexattrib_t *w = &wanted[id];
             pointer_state_t *p = &glstate->fpe_client.fog;
             w->vaarray = glstate->fpe_client.fog_array;
             if(w->vaarray) {
@@ -754,7 +820,7 @@ void realize_glenv(int ispoint) {
         for(int tex=0; tex<hardext.maxtex; tex++) {
             id = glprogram->builtin_attrib[ATT_MULTITEXCOORD0+tex];
             if(id!=-1) {
-                vertexattrib_t *w = &glstate->glesva.wanted[id];
+                vertexattrib_t *w = &wanted[id];
                 pointer_state_t *p = &glstate->fpe_client.tex[tex];
                 w->vaarray = glstate->fpe_client.tex_coord_array[tex];
                 if(w->vaarray) {
@@ -772,7 +838,7 @@ void realize_glenv(int ispoint) {
         // Normal
         id = glprogram->builtin_attrib[ATT_NORMAL];
         if(id!=-1) {
-            vertexattrib_t *w = &glstate->glesva.wanted[id];
+            vertexattrib_t *w = &wanted[id];
             pointer_state_t *p = &glstate->fpe_client.normal;
             w->vaarray = glstate->fpe_client.normal_array;
             if(w->vaarray) {
@@ -1033,7 +1099,7 @@ void realize_glenv(int ispoint) {
     if(glprogram->va_size[i])   // only check used VA...
     {
         vertexattrib_t *v = &glstate->glesva.vertexattrib[i];
-        vertexattrib_t *w = &glstate->glesva.wanted[i];
+        vertexattrib_t *w = (glprogram->has_builtin_attrib)?(&wanted[i]):(&glstate->glesva.wanted[i]);
         int dirty = 0;
         // enable / disable Array if needed
         if(v->vaarray != w->vaarray || (v->vaarray && w->divisor)) {
@@ -1050,15 +1116,45 @@ void realize_glenv(int ispoint) {
         // check if new value has to be sent to hardware
         if(v->vaarray) {
             // array case
+            void * ptr = (void*)((uintptr_t)w->pointer + ((w->buffer)?(uintptr_t)w->buffer->data:0));
             if(dirty || v->size!=w->size || v->type!=w->type || v->normalized!=w->normalized 
                 || v->stride!=w->stride || v->buffer!=w->buffer
-                || v->pointer!=(void*)((uintptr_t)w->pointer + ((w->buffer)?(uintptr_t)w->buffer->data:0))) {
-                v->size = w->size;
-                v->type = w->type;
-                v->normalized = w->normalized;
-                v->stride = w->stride;
-                v->pointer = (void*)((uintptr_t)w->pointer + ((w->buffer)?(uintptr_t)w->buffer->data:0));
-                v->buffer = w->buffer; // buffer is unused here
+                || v->pointer!=ptr) {
+                if((w->size==GL_BGRA || w->type==GL_DOUBLE) && !*scratch) { 
+                    // need to adjust, so first need the min/max (a shame as I already must have that somewhere)
+                    int imin, imax;
+                    if(type==0) {
+                        imin = first; imax = count;
+                    } else {
+                        if(type==GL_UNSIGNED_INT)
+                            getminmax_indices_ui(indices, &imax, &imin, count);
+                        else
+                            getminmax_indices_us(indices, &imax, &imin, count);
+                        ++imax;
+                    }
+                    if(w->size==GL_BGRA) {
+                        v->size = 4;
+                        v->type = GL_FLOAT;
+                        v->normalized = 0;
+                        v->pointer = *scratch = copy_gl_pointer_color_bgra(ptr, w->stride, 4, imin, imax);
+                        v->stride = 0;
+                        v->buffer = NULL;
+                    } else if (w->type == GL_DOUBLE) {
+                        // TODO
+                        static int warn = 1;
+                        if(warn) {
+                            printf("LIBGL: VertexAttribArray using GL_DOUBLE unimplemented!\n");
+                            warn=0;
+                        }
+                    }
+                } else {
+                    v->size = w->size;
+                    v->type = w->type;
+                    v->normalized = w->normalized;
+                    v->stride = w->stride;
+                    v->pointer = ptr;
+                    v->buffer = w->buffer; // buffer is unused here
+                }
                 LOAD_GLES2(glVertexAttribPointer);
                 gles_glVertexAttribPointer(i, v->size, v->type, v->normalized, v->stride, v->pointer);
                 DBG(printf("glVertexAttribPointer(%d, %d, %s, %d, %d, %p)\n", i, v->size, PrintEnum(v->type), v->normalized, v->stride, (GLvoid*)((uintptr_t)v->pointer+((v->buffer)?(uintptr_t)v->buffer->data:0)));)

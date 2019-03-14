@@ -1,6 +1,10 @@
 #include "hint.h"
+
 #include <gl4eshint.h>
 #include "init.h"
+#include "loader.h"
+#include "gl4es.h"
+#include "glstate.h"
 
 #ifdef PANDORA
 void pandora_set_gamma();
@@ -35,6 +39,9 @@ void gl4es_glHint(GLenum pname, GLenum mode) {
                 return;
             gles_glHint(pname, mode);
             break;
+        case GL_TEXTURE_COMPRESSION_HINT:   // ignore this one
+            // TODO: track setted value
+            return;
         // specifics GL4ES Hints
         case GL_SHRINK_HINT_GL4ES:
             if (mode<=11)
@@ -67,9 +74,7 @@ void gl4es_glHint(GLenum pname, GLenum mode) {
                 errorShim(GL_INVALID_ENUM); 
             break;
         case GL_COPY_HINT_GL4ES: 
-            if (mode<=1)
-                globals4es.copytex = mode;
-            else
+            if (mode>1) //removed
                 errorShim(GL_INVALID_ENUM); 
             break;
         case GL_NOLUMAPHA_HINT_GL4ES: 

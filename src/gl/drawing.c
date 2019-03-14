@@ -1,6 +1,14 @@
-#include "gl.h"
-#include "init.h"
 #include "../glx/hardext.h"
+#include "array.h"
+#include "enum_info.h"
+#include "fpe.h"
+#include "gl4es.h"
+#include "gles.h"
+#include "glstate.h"
+#include "init.h"
+#include "list.h"
+#include "loader.h"
+#include "render.h"
 
 static GLboolean is_cache_compatible(GLsizei count) {
     #define T2(AA, A, B) \
@@ -88,13 +96,13 @@ static renderlist_t *arrays_to_renderlist(renderlist_t *list, GLenum mode,
         if (glstate->vao->pointers[ATT_COLOR].enabled) {
             if(glstate->vao->shared_arrays) {
                 if(glstate->vao->pointers[ATT_COLOR].size==GL_BGRA)
-                    glstate->vao->color.ptr = copy_gl_pointer_color_bgra(&glstate->vao->pointers[ATT_COLOR], 4, 0, count);
+                    glstate->vao->color.ptr = copy_gl_pointer_color_bgra(glstate->vao->pointers[ATT_COLOR].pointer, glstate->vao->pointers[ATT_COLOR].stride, 4, 0, count);
                 else
                     glstate->vao->color.ptr = copy_gl_pointer_color(&glstate->vao->pointers[ATT_COLOR], 4, 0, count);
                 list->color = glstate->vao->color.ptr + 4*skip;
             } else {
                 if(glstate->vao->pointers[ATT_COLOR].size==GL_BGRA)
-                    list->color = copy_gl_pointer_color_bgra(&glstate->vao->pointers[ATT_COLOR], 4, skip, count);
+                    list->color = copy_gl_pointer_color_bgra(glstate->vao->pointers[ATT_COLOR].pointer, glstate->vao->pointers[ATT_COLOR].stride, 4, skip, count);
                 else
                     list->color = copy_gl_pointer_color(&glstate->vao->pointers[ATT_COLOR], 4, skip, count);
             }
@@ -102,13 +110,13 @@ static renderlist_t *arrays_to_renderlist(renderlist_t *list, GLenum mode,
         if (glstate->vao->pointers[ATT_SECONDARY].enabled/* && glstate->enable.color_array*/) {
             if(glstate->vao->shared_arrays) {
                 if(glstate->vao->pointers[ATT_SECONDARY].size==GL_BGRA)
-                    glstate->vao->secondary.ptr = copy_gl_pointer_color_bgra(&glstate->vao->pointers[ATT_SECONDARY], 4, 0, count);
+                    glstate->vao->secondary.ptr = copy_gl_pointer_color_bgra(glstate->vao->pointers[ATT_SECONDARY].pointer, glstate->vao->pointers[ATT_SECONDARY].stride, 4, 0, count);
                 else
                     glstate->vao->secondary.ptr = copy_gl_pointer(&glstate->vao->pointers[ATT_SECONDARY], 4, 0, count);		// alpha chanel is always 0 for secondary...
                     list->secondary = glstate->vao->secondary.ptr + 4*skip;
             } else {
                 if(glstate->vao->pointers[ATT_SECONDARY].size==GL_BGRA)
-                    list->secondary = copy_gl_pointer_color_bgra(&glstate->vao->pointers[ATT_SECONDARY], 4, skip, count);
+                    list->secondary = copy_gl_pointer_color_bgra(glstate->vao->pointers[ATT_SECONDARY].pointer, glstate->vao->pointers[ATT_SECONDARY].stride, 4, skip, count);
                 else
                     list->secondary = copy_gl_pointer(&glstate->vao->pointers[ATT_SECONDARY], 4, skip, count);		// alpha chanel is always 0 for secondary...
             }
@@ -183,7 +191,7 @@ GLuint len_indices(const GLushort *sindices, const GLuint *iindices, GLsizei cou
 static void glDrawElementsCommon(GLenum mode, GLint first, GLsizei count, GLuint len, const GLushort *sindices, const GLuint *iindices, int instancecount) {
     if (glstate->raster.bm_drawing)
         bitmap_flush();
-
+    //printf("glDrawElementsCommon(%s, %d, %d, %d, %p, %p, %d)\n", PrintEnum(mode), first, count, len, sindices, iindices, instancecount);
     LOAD_GLES_FPE(glDrawElements);
     LOAD_GLES_FPE(glDrawArrays);
     LOAD_GLES_FPE(glNormalPointer);

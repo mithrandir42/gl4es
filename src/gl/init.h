@@ -11,6 +11,7 @@ typedef struct _globals4es {
  int xrefresh;
  int stacktrace;
  int usefb;
+ int usegbm;
  int usefbo;
  int recyclefbo;
  int usepbuffer;
@@ -23,7 +24,6 @@ typedef struct _globals4es {
  int texdump;
  int alphahack;
  int texstream;
- int copytex;
  int nolumalpha;
  int blendhack;
  int blendcolor;
@@ -52,13 +52,22 @@ typedef struct _globals4es {
  int comments;
  int forcenpot;
  int fbomakecurrent;    // hack to bind/unbind FBO when doing glXMakeCurrent
+ int fbounbind;         // hack to bind/unbind fbo if a bind texture is used for drawing
  int fboforcetex;       // force texture attachment for Color0
  int notexarray;
  int nodepthtex;
  int logshader;
+ int shadernogles;
+ int floattex;
+ int glxrecycle;
+ int noclean;
+ int arb_program;
+ #ifndef NO_GBM
+ char drmcard[50];
+ #endif
  char version[50];
 } globals4es_t;
 
 extern globals4es_t globals4es;
 
-#endif
+#endif // _GL4ES_INIT_H_

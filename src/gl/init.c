@@ -1,18 +1,21 @@
-#include <unistd.h>
-#include <stdio.h>
 #include "init.h"
-#include "gl.h"
-#include "debug.h"
-#include "../glx/hardext.h"
-#include "../../version.h"
-#include "../glx/streaming.h"
+
 #if !defined(ANDROID) && !defined(AMIGAOS4)
 #include <execinfo.h>
 #endif
+#include <stdio.h>
+#include <unistd.h>
+#include "../../version.h"
+#include "../glx/glx_gbm.h"
+#include "../glx/streaming.h"
+#include "build_info.h"
+#include "debug.h"
+#include "loader.h"
+#include "logs.h"
 
 void gl_init();
 
-globals4es_t globals4es;
+globals4es_t globals4es = {0};
 
 #define SHUT(a) if(!globals4es.nobanner) a
 
@@ -30,8 +33,11 @@ static void fast_math() {
 #endif
 
 #ifndef DEFAULT_ES
-// forcing GLES 1.1 for now
+#if defined(PANDORA) || defined(ANDROID)
 #define DEFAULT_ES 1
+#else
+#define DEFAULT_ES 2
+#endif
 #endif
 
 void load_libs();
@@ -59,7 +65,7 @@ void initialize_gl4es() {
 
 	SHUT(LOGD("LIBGL: Initialising gl4es\n"));
 	
-    SHUT(LOGD("LIBGL: v%d.%d.%d built on %s %s\n", MAJOR, MINOR, REVISION, __DATE__, __TIME__));
+    SHUT(print_build_infos());
     #define env(name, global, message)                    \
         char *env_##name = getenv(#name);                 \
         if (env_##name && strcmp(env_##name, "1") == 0) { \
@@ -87,6 +93,16 @@ void initialize_gl4es() {
             globals4es.usepbuffer = 1;
     }
 #endif
+    if (env_fb && strcmp(env_fb, "4") == 0) {
+#ifdef NO_GBM
+        SHUT(LOGD("LIBGL: GBM Support not builded, cannot use it\n"));
+#else
+        SHUT(LOGD("LIBGL: using GBM\n"));
+        globals4es.usefb = 0;
+        globals4es.usegbm = 1;
+#endif
+    }
+
     env(LIBGL_FPS, globals4es.showfps, "fps counter enabled");
 #ifdef USE_FBIO
     env(LIBGL_VSYNC, globals4es.vsync, "vsync enabled");
@@ -99,6 +115,7 @@ void initialize_gl4es() {
     }
 #endif
     env(LIBGL_NOBGRA, globals4es.nobgra, "Ignore BGRA texture capability");
+    env(LIBGL_ARBPROGRAM, globals4es.arb_program, "Export (Fake!) ARB Program extensions");
     char *env_es = getenv("LIBGL_ES");
     if (env_es && strcmp(env_es, "1") == 0) {
             globals4es.es = 1;
@@ -127,11 +144,28 @@ void initialize_gl4es() {
     SHUT(LOGD("LIBGL: Using GLES %s backend\n", (globals4es.es==1)?"1.1":"2.0"));
 
     env(LIBGL_NODEPTHTEX, globals4es.nodepthtex, "Disable usage of Depth Textures");
+    char* env_drmcard = getenv("LIBGL_DRMCARD");
+    if(env_drmcard) {
+#ifdef NO_GBM
+        SHUT(LOGD("LIBGL: Warning, GBM not compiled in, cannot use LIBGL_DRMCARD\n"));
+#else
+        strncpy(globals4es.drmcard, env_drmcard, 50);
+    } else {
+        strcpy(globals4es.drmcard, "/dev/dri/card0");
+#endif
+    }
 
     load_libs();
+    if(globals4es.usegbm)
+        LoadGBMFunctions();
+    if(globals4es.usegbm && !gbm) {
+        SHUT(LOGD("LIBGL: cannot use GBM, disabling\n"));
+        globals4es.usegbm = 0;  // should do some smarter fallback?
+    }
+
     glx_init();
 
-#ifdef NOEGL
+#if defined(NOEGL) && !defined(ANDROID)
     int gl4es_notest = 1;
 #else
     int gl4es_notest = 0;
@@ -141,6 +175,17 @@ void initialize_gl4es() {
     }
 #endif
     env(LIBGL_NOHIGHP, globals4es.nohighp, "Do not use HIGHP in fragment shader even if detected");
+
+    globals4es.floattex = 1;
+    char *env_float = getenv("LIBGL_FLOAT");
+    if (env_float && strcmp(env_float, "0") == 0) {
+        globals4es.floattex = 0;
+        SHUT(LOGD("LIBGL: Float and Half-Float texture support disabled\n"));
+    }
+    if (env_float && strcmp(env_float, "2") == 0) {
+        globals4es.floattex = 2;
+        SHUT(LOGD("LIBGL: Float and Half-float texture support forced\n"));
+    }
 
     GetHardwareExtensions(gl4es_notest);
     gl_init();
@@ -244,11 +289,6 @@ void initialize_gl4es() {
         //FreeStreamed(AddStreamed(1024, 512, 0));
     }
 #endif
-    char *env_copy = getenv("LIBGL_COPY");
-    if (env_copy && strcmp(env_copy, "1") == 0) {
-        SHUT(LOGD("LIBGL: No glCopyTexImage2D / glCopyTexSubImage2D hack\n"));
-        globals4es.copytex = 1;
-    }
     char *env_lumalpha = getenv("LIBGL_NOLUMALPHA");
     if (env_lumalpha && strcmp(env_lumalpha, "1") == 0) {
         globals4es.nolumalpha = 1;
@@ -293,12 +333,17 @@ void initialize_gl4es() {
 #endif
     }
     char *env_npot = getenv("LIBGL_NPOT");
-    globals4es.npot = hardext.npot;
+    switch(hardext.npot) {
+        case 0: globals4es.npot = 0; break;
+        case 1:
+        case 2: globals4es.npot = 1; break;
+        case 3: globals4es.npot = 2; break;
+    }
     if (env_npot && strcmp(env_npot, "1") == 0 && globals4es.npot<1) {
 		globals4es.npot = 1;
 		SHUT(LOGD("LIBGL: Expose limited NPOT extension\n"));
 	}
-    if (env_npot && strcmp(env_npot, "2") == 0 && globals4es.npot<2) {
+    if (env_npot && strcmp(env_npot, "2") == 0 && globals4es.npot<3) {
 		globals4es.npot = 2;
 		SHUT(LOGD("LIBGL: Expose GL_ARB_texture_non_power_of_two extension\n"));
 	}
@@ -352,11 +397,11 @@ void initialize_gl4es() {
     env(LIBGL_POTFRAMEBUFFER, globals4es.potframebuffer, "Force framebuffers to be on POT size");
 
     char *env_forcenpot = getenv("LIBGL_FORCENPOT");
-    if ((env_forcenpot && strcmp(env_forcenpot,"0") == 0) && (hardext.esversion==2 && hardext.npot==1)) {
+    if ((env_forcenpot && strcmp(env_forcenpot,"0") == 0) && (hardext.esversion==2 && (hardext.npot==1 || hardext.npot==2))) {
         SHUT(LOGD("LIBGL: Not forcing NPOT support\n"));
     } else
-    if ((env_forcenpot && strcmp(env_forcenpot,"1") == 0) || (hardext.esversion==2 && hardext.npot==1)) {
-        if(hardext.npot==2) {
+    if ((env_forcenpot && strcmp(env_forcenpot,"1") == 0) || (hardext.esversion==2 && (hardext.npot==1 || hardext.npot==2))) {
+        if(hardext.npot==3) {
             SHUT(LOGD("LIBGL: NPOT texture handled in hardware\n"));
         } else if(hardext.npot==1) {
             globals4es.forcenpot = 1;
@@ -403,11 +448,25 @@ void initialize_gl4es() {
         SHUT(LOGD("LIBGL: glXMakeCurrent FBO workaround enabled\n"));
     }
 
+    globals4es.fbounbind = 0;
+    if((hardext.vendor & VEND_ARM) || (hardext.vendor & VEND_IMGTEC))
+        globals4es.fbounbind = 1;
+    char *env_fbounbind = getenv("LIBGL_FBOUNBIND");
+    if(globals4es.fbounbind && env_fbounbind && !strcmp(env_fbounbind, "0")) {
+        globals4es.fbounbind = 0;
+        SHUT(LOGD("LIBGL: FBO workaround for using binded texture disabled\n"));
+    }
+    if(env_fbounbind && !strcmp(env_fbounbind, "1"))
+        globals4es.fbounbind = 1;
+    if(globals4es.fbounbind) {
+        SHUT(LOGD("LIBGL: FBO workaround for using binded texture enabled\n"));
+    }
+
     env(LIBGL_FBOFORCETEX, globals4es.fboforcetex, "Force texture for Attachment color0 on FBO");
 
     env(LIBGL_COMMENTS, globals4es.comments, "Keep comments in converted Shaders");
 
-    if(hardext.npot==2)
+    if(hardext.npot==3)
         globals4es.defaultwrap=0; 
     else
         globals4es.defaultwrap=1; 
@@ -434,8 +493,25 @@ void initialize_gl4es() {
     }
 
     env(LIBGL_LOGSHADERERROR, globals4es.logshader, "Log to the console Error compiling shaders");
+    env(LIBGL_SHADERNOGLES, globals4es.shadernogles, "Remove GLES part in shader");
+    env(LIBGL_NOCLEAN, globals4es.noclean, "Don't clean Context when destroy");
 
 
+    globals4es.glxrecycle = 1;
+#ifndef NOEGL
+    if((globals4es.usepbuffer) || (globals4es.usefb))
+        globals4es.glxrecycle = 0;
+    char *env_glxrecycle = getenv("LIBGL_GLXRECYCLE");
+    if(globals4es.glxrecycle && env_glxrecycle && !strcmp(env_glxrecycle, "0") && !((globals4es.usepbuffer) || (globals4es.usefb))) {
+        globals4es.glxrecycle = 0;
+        SHUT(LOGD("LIBGL: glX Will NOT try to recycle EGL Surface\n"));
+    }
+    if(env_glxrecycle && !strcmp(env_glxrecycle, "1"))
+        globals4es.glxrecycle = 1;
+    if(globals4es.glxrecycle) {
+        SHUT(LOGD("LIBGL: glX Will try to recycle EGL Surface\n"));
+    }
+#endif
     char cwd[1024];
     if (getcwd(cwd, sizeof(cwd))!= NULL)
         SHUT(LOGD("LIBGL: Current folder is:%s\n", cwd));

@@ -1,11 +1,16 @@
 #include "framebuffers.h"
-#include "debug.h"
-#include "../glx/hardext.h"
-#include "init.h"
+
 #if !defined(ANDROID) && !defined(AMIGAOS4)
 #include <execinfo.h>
 #endif
+#include "../glx/hardext.h"
 #include "blit.h"
+#include "debug.h"
+#include "fpe.h"
+#include "gl4es.h"
+#include "glstate.h"
+#include "init.h"
+#include "loader.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -14,100 +19,69 @@
 #define DBG(a)
 #endif
 
+KHASH_MAP_IMPL_INT(renderbufferlist_t, glrenderbuffer_t *);
+KHASH_MAP_IMPL_INT(framebufferlist_t, glframebuffer_t *);
+
 //extern void* eglGetProcAddress(const char* name);
 
 int npot(int n);
 int wrap_npot(GLenum wrap);
 
+glframebuffer_t* find_framebuffer(GLuint framebuffer) {
+    // Get a framebuffer based on ID
+    if (framebuffer == 0) return glstate->fbo.fbo_0; // NULL or fbo_0 ?
+    int ret;
+    khint_t k;
+    khash_t(framebufferlist_t) *list = glstate->fbo.framebufferlist;
+    k = kh_get(framebufferlist_t, list, framebuffer);
+    
+    if (k != kh_end(list)){
+        return kh_value(list, k);
+    }
+    return NULL;
+}
+
+glframebuffer_t* get_framebuffer(GLenum target) {
+    switch (target) {
+        case GL_FRAMEBUFFER: return glstate->fbo.current_fb;
+        case GL_READ_FRAMEBUFFER: return glstate->fbo.fbo_read;
+        case GL_DRAW_FRAMEBUFFER: return glstate->fbo.fbo_draw;
+    }
+    return NULL;
+}
+
+
 void readfboBegin() {
 	if (glstate->fbo.fbo_read == glstate->fbo.fbo_draw)
         return;
-    DBG(printf("readfboBegin, fbo status read=%u, draw=%u, main=%u, current=%u\n", glstate->fbo.fbo_read, glstate->fbo.fbo_draw, glstate->fbo.mainfbo_fbo, glstate->fbo.current_fb);)
-    LOAD_GLES2_OR_OES(glBindFramebuffer);
-	GLuint fbo = glstate->fbo.fbo_read;
+    DBG(printf("readfboBegin, fbo status read=%u, draw=%u, main=%u, current=%u\n", glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id, glstate->fbo.mainfbo_fbo, glstate->fbo.current_fb->id);)
+    if(glstate->fbo.fbo_read==glstate->fbo.current_fb)
+        return;
+    glstate->fbo.current_fb = glstate->fbo.fbo_read;
+	GLuint fbo = glstate->fbo.fbo_read->id;
 	if (!fbo)
 		fbo = glstate->fbo.mainfbo_fbo;
+    LOAD_GLES2_OR_OES(glBindFramebuffer);
 	gles_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 }
 
 void readfboEnd() {
-	if (glstate->fbo.fbo_read == glstate->fbo.fbo_draw)
+	if (glstate->fbo.fbo_read->id == glstate->fbo.fbo_draw->id)
         return;
     DBG(printf("readfboEnd, fbo status read=%u, draw=%u, main=%u, current=%u\n", glstate->fbo.fbo_read, glstate->fbo.fbo_draw, glstate->fbo.mainfbo_fbo, glstate->fbo.current_fb);)
-    LOAD_GLES2_OR_OES(glBindFramebuffer);
-	GLuint fbo = glstate->fbo.current_fb;
+    if(glstate->fbo.fbo_draw==glstate->fbo.current_fb)
+        return;
+    glstate->fbo.current_fb = glstate->fbo.fbo_draw;
+	GLuint fbo = glstate->fbo.fbo_draw->id;
 	if (!fbo)
 		fbo = glstate->fbo.mainfbo_fbo;
+    LOAD_GLES2_OR_OES(glBindFramebuffer);
 	gles_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-}
-
-void attach_fbotexture(GLuint fbo, GLuint texture, int width, int height) {
-    DBG(printf("attach_fbotexture(%d, %d)\n", fbo, texture);)
-    int idx = -1;
-    if(glstate->fbo.mainfbo_fbo && !fbo)
-        fbo = glstate->fbo.mainfbo_fbo;
-    if(glstate->fbo.tex_fbo) {
-        for (int i=0; i<glstate->fbo.nbr_fbot && idx==-1; i++)
-            if(glstate->fbo.tex_fbo[i].framebuffer==fbo) 
-                idx = i;
-    }
-    if (idx!=-1) {
-        glstate->fbo.tex_fbo[idx].texture = texture;
-        glstate->fbo.tex_fbo[idx].width = width;
-        glstate->fbo.tex_fbo[idx].height = height;
-    } else {
-        if(glstate->fbo.nbr_fbot == glstate->fbo.cap_fbot) {
-            glstate->fbo.cap_fbot += 16;
-            glstate->fbo.tex_fbo = (gltexframebuffer_t*)realloc(glstate->fbo.tex_fbo, glstate->fbo.cap_fbot*sizeof(gltexframebuffer_t));
-        }
-        idx = glstate->fbo.nbr_fbot++;
-        glstate->fbo.tex_fbo[idx].framebuffer = fbo;
-        glstate->fbo.tex_fbo[idx].texture = texture;
-        glstate->fbo.tex_fbo[idx].width = width;
-        glstate->fbo.tex_fbo[idx].height = height;
-    }
-}
-
-void detach_fbotexture(glstate_t* glstate, GLuint fbo) {
-    DBG(printf("detach_fbotexture(%d)\n", fbo);)
-    int idx = -1;
-    if(glstate->fbo.mainfbo_fbo && !fbo)
-        fbo = glstate->fbo.mainfbo_fbo;
-    if(glstate->fbo.tex_fbo) {
-        for (int i=0; i<glstate->fbo.nbr_fbot && idx==-1; i++)
-            if(glstate->fbo.tex_fbo[i].framebuffer==fbo) 
-                idx = i;
-    }
-    if(idx==-1)
-        return;
-    if(idx<glstate->fbo.nbr_fbot)
-        memmove(&glstate->fbo.tex_fbo[idx+1], &glstate->fbo.tex_fbo[idx], sizeof(gltexframebuffer_t)*(glstate->fbo.nbr_fbot-(idx+1)));
-    
-    --glstate->fbo.nbr_fbot;
-}
-
-int find_fbotexture(GLuint fbo, GLuint *texture, int *width, int *height) {
-    DBG(printf("find_fbotexture(%d)", fbo);)
-    int idx = -1;
-    if(glstate->fbo.mainfbo_fbo && !fbo)
-        fbo = glstate->fbo.mainfbo_fbo;
-    if(glstate->fbo.tex_fbo) {
-        for (int i=0; i<glstate->fbo.nbr_fbot && idx==-1; i++)
-            if(glstate->fbo.tex_fbo[i].framebuffer==fbo) 
-                idx = i;
-    }
-    if(width) *width=(idx==-1)?glstate->fbo.mainfbo_width:glstate->fbo.tex_fbo[idx].width;
-    if(height) *height=(idx==-1)?glstate->fbo.mainfbo_height:glstate->fbo.tex_fbo[idx].height;
-    if(texture) *texture=(idx==-1)?0:glstate->fbo.tex_fbo[idx].texture;
-    
-    DBG(printf(" => %d\n", (idx==-1)?0:glstate->fbo.tex_fbo[idx].texture);)
-
-    return (idx==-1)?0:1;
 }
 
 glrenderbuffer_t* find_renderbuffer(GLuint renderbuffer) {
     // Get a renderbuffer based on ID
-    if (renderbuffer == 0) return NULL; // texture 0 is a texture mostly like any other... it is not "unbind" texture in fact, but it's not shared
+    if (renderbuffer == 0) return glstate->fbo.default_rb;
     int ret;
     khint_t k;
     khash_t(renderbufferlist_t) *list = glstate->fbo.renderbufferlist;
@@ -123,35 +97,89 @@ void gl4es_glGenFramebuffers(GLsizei n, GLuint *ids) {
     DBG(printf("glGenFramebuffers(%i, %p)\n", n, ids);)
     LOAD_GLES2_OR_OES(glGenFramebuffers);
     GLsizei m = 0;
-    while(globals4es.recyclefbo && (glstate->fbo.nbr_fbos>0) && (n-m>0)) {
+    while(glstate->fbo.old && (glstate->fbo.old->nbr>0) && (n-m>0)) {
         DBG(printf("Recycled 1 FBO\n");)
-        ids[m++] = glstate->fbo.old_fbos[--glstate->fbo.nbr_fbos];
+        ids[m++] = glstate->fbo.old->fbos[--glstate->fbo.old->nbr];
     }
     noerrorShim();
     if(n-m == 0)
         return;
     errorGL();
     gles_glGenFramebuffers(n-m, ids+m);
+
+    // track the framebuffers...
+    int ret;
+    khint_t k;
+    khash_t(framebufferlist_t) *list = glstate->fbo.framebufferlist;
+    for(int i=0; i<n; ++i) {
+        k = kh_put(framebufferlist_t, list, ids[i], &ret);
+        glframebuffer_t *fb = kh_value(list, k) = malloc(sizeof(glframebuffer_t));
+        memset(fb, 0, sizeof(glframebuffer_t));
+        fb->id = ids[i];
+    }
+
 }
 
 void gl4es_glDeleteFramebuffers(GLsizei n, GLuint *framebuffers) {
     DBG(printf("glDeleteFramebuffers(%i, %p), framebuffers[0]=%u\n", n, framebuffers, framebuffers[0]);)
-    for (int i=0; i<n; i++)
-        detach_fbotexture(glstate, framebuffers[i]);
+    // delete tracking
+    khint_t k;
+    if (glstate->fbo.framebufferlist)
+        for (int i=0; i<n; i++) {
+            khint_t k;
+            glframebuffer_t *fb;
+            for (int i = 0; i < n; i++) {
+                GLuint t = framebuffers[i];
+                if(t) {
+                    k = kh_get(framebufferlist_t, glstate->fbo.framebufferlist, t);
+                    if (k != kh_end(glstate->fbo.framebufferlist)) {
+                        fb = kh_value(glstate->fbo.framebufferlist, k);
+                        // detach texture...
+                        for(int j=0; j<10; ++j) {
+                            if(fb->color[j] && fb->t_color[j]!=GL_RENDERBUFFER) {
+                                gltexture_t *tex = gl4es_getTexture(fb->t_color[j], fb->color[j]);
+                                if(tex) {
+                                    tex->binded_fbo = 0;
+                                    tex->binded_attachment = 0;
+                                }
+                            }
+                        }
+                        if(fb->depth && fb->t_depth!=GL_RENDERBUFFER) {
+                            gltexture_t *tex = gl4es_getTexture(fb->t_depth, fb->depth);
+                            if(tex) {
+                                tex->binded_fbo = 0;
+                                tex->binded_attachment = 0;
+                                tex->renderdepth = 0;
+                            }
+                        }
+                        if(fb->stencil && fb->t_stencil!=GL_RENDERBUFFER) {
+                            gltexture_t *tex = gl4es_getTexture(fb->t_stencil, fb->stencil);
+                            if(tex) {
+                                tex->binded_fbo = 0;
+                                tex->binded_attachment = 0;
+                                tex->renderstencil = 0;
+                            }
+                        }
+                        free(fb);
+                        kh_del(framebufferlist_t, glstate->fbo.framebufferlist, k);                        
+                    }
+                }
+            }
+        }
 
     if (globals4es.recyclefbo) {
         DBG(printf("Recycling %i FBOs\n", n);)
         noerrorShim();
-        if(glstate->fbo.cap_fbos == 0) {
-            glstate->fbo.cap_fbos = 16;
-            glstate->fbo.old_fbos = (GLuint*)malloc(glstate->fbo.cap_fbos * sizeof(GLuint));
+        if(glstate->fbo.old->cap == 0) {
+            glstate->fbo.old->cap = 16;
+            glstate->fbo.old->fbos = (GLuint*)malloc(glstate->fbo.old->cap * sizeof(GLuint));
         }
-        if (glstate->fbo.nbr_fbos+n == glstate->fbo.cap_fbos) {
-            glstate->fbo.cap_fbos += n;
-            glstate->fbo.old_fbos = (GLuint*)realloc(glstate->fbo.old_fbos, glstate->fbo.cap_fbos *sizeof(GLuint));
+        if (glstate->fbo.old->nbr+n == glstate->fbo.old->cap) {
+            glstate->fbo.old->cap += n;
+            glstate->fbo.old->fbos = (GLuint*)realloc(glstate->fbo.old->fbos, glstate->fbo.old->cap *sizeof(GLuint));
         }
-        memcpy(glstate->fbo.old_fbos+glstate->fbo.nbr_fbos, framebuffers, n*sizeof(GLuint));
-        glstate->fbo.nbr_fbos += n;
+        memcpy(glstate->fbo.old->fbos+glstate->fbo.old->nbr, framebuffers, n*sizeof(GLuint));
+        glstate->fbo.old->nbr += n;
     } else {
         LOAD_GLES2_OR_OES(glDeleteFramebuffers);
         errorGL();
@@ -164,57 +192,64 @@ GLboolean gl4es_glIsFramebuffer(GLuint framebuffer) {
     LOAD_GLES2_OR_OES(glIsFramebuffer);
     
     errorGL();
-    return gles_glIsFramebuffer(framebuffer);
+    return find_framebuffer(framebuffer)!=NULL;
 }
 
-//#define BEFORE 1
 GLenum gl4es_glCheckFramebufferStatus(GLenum target) {
-#ifdef BEFORE
-    GLenum result = glstate->fbo.fb_status;
-    noerrorShim();
-#else
-    LOAD_GLES2_OR_OES(glCheckFramebufferStatus);
-    
-    errorGL();
-    GLenum result = gles_glCheckFramebufferStatus(target);
-#endif
-DBG(printf("glCheckFramebufferStatus(0x%04X)=0x%04X\n", target, result);)
+    GLenum result;
+    if(glstate->fbo.internal) {
+        result = glstate->fbo.fb_status;
+        noerrorShim();
+     } else {
+        LOAD_GLES2_OR_OES(glCheckFramebufferStatus);
+        
+        errorGL();
+        result = gles_glCheckFramebufferStatus(target);
+     }
+    DBG(printf("glCheckFramebufferStatus(0x%04X)=0x%04X\n", target, result);)
     return result;
 }
 
 void gl4es_glBindFramebuffer(GLenum target, GLuint framebuffer) {
-    DBG(printf("glBindFramebuffer(%s, %u), list=%s, glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), framebuffer, glstate->list.active?"active":"none", glstate->fbo.current_fb, glstate->fbo.fbo_draw, glstate->fbo.fbo_read);)
+    DBG(printf("glBindFramebuffer(%s, %u), list=%s, glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), framebuffer, glstate->list.active?"active":"none", glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id);)
 	PUSH_IF_COMPILING(glBindFramebuffer);
     LOAD_GLES2_OR_OES(glBindFramebuffer);
 //    LOAD_GLES2_OR_OES(glCheckFramebufferStatus);
     LOAD_GLES(glGetError);
+
+    glframebuffer_t *fb = find_framebuffer(framebuffer);
+    if(!fb) {
+        errorShim(GL_INVALID_VALUE);
+        return;
+    }
         
     if (target == GL_FRAMEBUFFER) {
-        glstate->fbo.fbo_read = framebuffer;
-        glstate->fbo.fbo_draw = framebuffer;
+        glstate->fbo.fbo_read = fb;
+        glstate->fbo.fbo_draw = fb;
     }
     
     if (target == GL_READ_FRAMEBUFFER) {
-		glstate->fbo.fbo_read = framebuffer;
+		glstate->fbo.fbo_read = fb;
         noerrorShim();
         glstate->fbo.fb_status = GL_FRAMEBUFFER_COMPLETE;
+        glstate->fbo.internal = 1;
 		return;	//don't bind for now
-	}
+	} else glstate->fbo.internal = 0;
         
     if (target == GL_DRAW_FRAMEBUFFER) {
 		target = GL_FRAMEBUFFER;
-		glstate->fbo.fbo_draw = framebuffer;
+		glstate->fbo.fbo_draw = fb;
 	}
     
-    if(target==GL_FRAMEBUFFER && framebuffer!=0) {
-        gles_glBindFramebuffer(target, 0);
-        //gles_glCheckFramebufferStatus(target);
+    if (target != GL_FRAMEBUFFER) {
+        errorShim(GL_INVALID_ENUM);
+        return;
     }
-        
-    glstate->fbo.current_fb = framebuffer;
 
-    if (framebuffer==0)
+    if(framebuffer==0)
         framebuffer = glstate->fbo.mainfbo_fbo;
+
+    glstate->fbo.current_fb = fb;
         
     gles_glBindFramebuffer(target, framebuffer);
     GLenum err=gles_glGetError();
@@ -222,7 +257,6 @@ void gl4es_glBindFramebuffer(GLenum target, GLuint framebuffer) {
     
 //    glstate->fbo.fb_status = (framebuffer==0)?GL_FRAMEBUFFER_COMPLETE:gles_glCheckFramebufferStatus(target);
 }
-#undef BEFORE
 
 GLenum ReadDraw_Push(GLenum target) {
     if(target==GL_FRAMEBUFFER)
@@ -230,12 +264,12 @@ GLenum ReadDraw_Push(GLenum target) {
     LOAD_GLES2_OR_OES(glBindFramebuffer);
     if(target==GL_DRAW_FRAMEBUFFER) {
         if(glstate->fbo.current_fb!=glstate->fbo.fbo_draw)
-            gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.fbo_draw)?glstate->fbo.fbo_draw:glstate->fbo.mainfbo_fbo);
+            gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.fbo_draw->id)?glstate->fbo.fbo_draw->id:glstate->fbo.mainfbo_fbo);
         return GL_FRAMEBUFFER;
     }
     if(target==GL_READ_FRAMEBUFFER) {
         if(glstate->fbo.current_fb!=glstate->fbo.fbo_read)
-            gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.fbo_read)?glstate->fbo.fbo_read:glstate->fbo.mainfbo_fbo);
+            gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.fbo_read->id)?glstate->fbo.fbo_read->id:glstate->fbo.mainfbo_fbo);
         return GL_FRAMEBUFFER;
     }
     return target;
@@ -245,15 +279,92 @@ void ReadDraw_Pop(GLenum target) {
         return;
     LOAD_GLES2_OR_OES(glBindFramebuffer);
     if(target==GL_DRAW_FRAMEBUFFER && glstate->fbo.current_fb!=glstate->fbo.fbo_draw) {
-        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb)?glstate->fbo.current_fb:glstate->fbo.mainfbo_fbo);
+        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb->id)?glstate->fbo.current_fb->id:glstate->fbo.mainfbo_fbo);
     }
     if(target==GL_READ_FRAMEBUFFER && glstate->fbo.current_fb!=glstate->fbo.fbo_read) {
-        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb)?glstate->fbo.current_fb:glstate->fbo.mainfbo_fbo);
+        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb->id)?glstate->fbo.current_fb->id:glstate->fbo.mainfbo_fbo);
     }
 }
 
-void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,	GLint level) {
-    DBG(printf("glFramebufferTexture2D(%s, %s, %s, %u, %i) glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), PrintEnum(attachment), PrintEnum(textarget), texture, level, glstate->fbo.current_fb, glstate->fbo.fbo_draw, glstate->fbo.fbo_read);)
+void SetAttachment(glframebuffer_t* fb, GLenum attachment, GLenum atttarget, GLuint att, int level)
+{
+    switch (attachment) {
+    case GL_COLOR_ATTACHMENT0:
+    /*case GL_COLOR_ATTACHMENT1:
+    case GL_COLOR_ATTACHMENT2:*/
+        fb->color[attachment - GL_COLOR_ATTACHMENT0] = att;
+        fb->l_color[attachment - GL_COLOR_ATTACHMENT0] = level;
+        fb->t_color[attachment - GL_COLOR_ATTACHMENT0] = atttarget;
+        break;
+    case GL_DEPTH_ATTACHMENT:
+        fb->depth = att;
+        fb->t_depth = atttarget;
+        fb->l_depth = 0;
+        break;
+    case GL_STENCIL_ATTACHMENT:
+        fb->stencil = att;
+        fb->t_stencil = atttarget;
+        fb->l_stencil = 0;
+        break;
+    case GL_DEPTH_STENCIL_ATTACHMENT:
+        fb->depth = att;
+        fb->t_depth = atttarget;
+        fb->l_depth = 0;
+        fb->stencil = att;
+        fb->t_stencil = atttarget;
+        fb->l_stencil = 0;
+        break;
+    }
+}
+GLuint GetAttachment(glframebuffer_t* fb, GLenum attachment) {
+    switch (attachment) {
+    case GL_COLOR_ATTACHMENT0:
+    /*case GL_COLOR_ATTACHMENT1:
+    case GL_COLOR_ATTACHMENT2:*/
+        return fb->color[attachment - GL_COLOR_ATTACHMENT0];
+    case GL_DEPTH_ATTACHMENT:
+        return fb->depth;
+    case GL_STENCIL_ATTACHMENT:
+        return fb->stencil;
+    case GL_DEPTH_STENCIL_ATTACHMENT:
+        // is that possible?
+        return fb->depth;
+    }
+    return 0;
+}
+GLenum GetAttachmentType(glframebuffer_t* fb, GLenum attachment) {
+    switch (attachment) {
+    case GL_COLOR_ATTACHMENT0:
+    /*case GL_COLOR_ATTACHMENT1:
+    case GL_COLOR_ATTACHMENT2:*/
+        return fb->t_color[attachment - GL_COLOR_ATTACHMENT0];
+    case GL_DEPTH_ATTACHMENT:
+        return fb->t_depth;
+    case GL_STENCIL_ATTACHMENT:
+        return fb->t_stencil;
+    case GL_DEPTH_STENCIL_ATTACHMENT:
+        return fb->t_depth;
+    }
+    return 0;
+}
+int GetAttachmentLevel(glframebuffer_t* fb, GLenum attachment) {
+    switch (attachment) {
+    case GL_COLOR_ATTACHMENT0:
+    /*case GL_COLOR_ATTACHMENT1:
+    case GL_COLOR_ATTACHMENT2:*/
+        return fb->l_color[attachment - GL_COLOR_ATTACHMENT0];
+    case GL_DEPTH_ATTACHMENT:
+        return fb->l_depth;
+    case GL_STENCIL_ATTACHMENT:
+        return fb->l_stencil;
+    case GL_DEPTH_STENCIL_ATTACHMENT:
+        return fb->l_depth;
+    }
+    return 0;
+}
+
+void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
+    DBG(printf("glFramebufferTexture2D(%s, %s, %s, %u, %i) glstate->fbo.current_fb=%d (draw=%d, read=%d)\n", PrintEnum(target), PrintEnum(attachment), PrintEnum(textarget), texture, level, glstate->fbo.current_fb->id, glstate->fbo.fbo_draw->id, glstate->fbo.fbo_read->id);)
     static GLuint scrap_tex = 0;
     static int scrap_width = 0;
     static int scrap_height = 0;
@@ -264,34 +375,38 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
     LOAD_GLES(glActiveTexture);
     LOAD_GLES(glTexParameteri);
 
+    glframebuffer_t *fb = get_framebuffer(target);
+    if(!fb) {
+        errorShim(GL_INVALID_ENUM);
+        return;
+    }
+
     // Ignore Color attachment 1 .. 9
     if ((attachment>=GL_COLOR_ATTACHMENT0+1) && (attachment<=GL_COLOR_ATTACHMENT0+9)) {
         errorShim(GL_INVALID_ENUM);
         return;
     }
+
+    if( attachment!=GL_COLOR_ATTACHMENT0 
+     && attachment!=GL_DEPTH_ATTACHMENT 
+     && attachment!=GL_STENCIL_ATTACHMENT 
+     && attachment!=GL_DEPTH_STENCIL_ATTACHMENT) {
+         errorShim(GL_INVALID_ENUM);
+         return;
+     }
     
     int twidth = 0, theight = 0;
     // find texture and get it's real name
     gltexture_t *tex = NULL;
     if (texture) {
-        int ret;
-        khint_t k;
-        khash_t(tex) *list = glstate->texture.list;
-        if (! list) {
-            list = glstate->texture.list = kh_init(tex);
-            // segfaults if we don't do a single put
-            kh_put(tex, list, 1, &ret);
-            kh_del(tex, list, 1);
-        }
-        k = kh_get(tex, list, texture);
-        
-        if (k == kh_end(list)){
+        tex = gl4es_getTexture(textarget, texture);
+
+        if (!tex) {
             LOGE("LIBGL: texture for FBO not found, name=%u\n", texture);
         } else {
-            tex = kh_value(list, k);
             texture = tex->glname;
             // check if texture is shrinked...
-            if (tex->shrink || tex->useratio || (tex->adjust && hardext.npot==1 && !globals4es.potframebuffer)) {
+            if (tex->shrink || tex->useratio || (tex->adjust && (hardext.npot==1 || hardext.npot==2) && !globals4es.potframebuffer)) {
                 LOGD("LIBGL: %s texture for FBO\n",(tex->useratio)?"going back to npot size pot'ed":"unshrinking shrinked");
                 if(tex->shrink || tex->useratio) {
                     if(tex->useratio) {
@@ -312,24 +427,26 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                 if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
                 gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
                 GLuint oldtex = bound->glname;
-                if(hardext.npot==1 && !(wrap_npot(tex->wrap_s) && wrap_npot(tex->wrap_t))) {
-                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                    tex->adjust = 0;
-                }
                 if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
                 gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
                 if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
                 if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
             }
-            if(globals4es.potframebuffer && (npot(twidth)!=twidth || npot(theight!=theight))) {
+            int need_change = (globals4es.potframebuffer && (npot(twidth)!=twidth || npot(theight!=theight)))?1:0;
+            if((tex->type==GL_FLOAT && !hardext.floatfbo) || (tex->type==GL_HALF_FLOAT_OES && !hardext.halffloatfbo)) {
+                need_change += 2;
+                tex->type = GL_UNSIGNED_BYTE;
+            }
+            if(need_change) {
                 // check if POT size is asked
-                LOGD("LIBGL: Resize to POT dimension texture for FBO\n");
-                twidth = tex->nwidth = npot(tex->nwidth);
-                theight = tex->nheight = npot(tex->nheight);
-                tex->adjustxy[0] = (float)tex->width / tex->nwidth;
-                tex->adjustxy[1] = (float)tex->height / tex->nheight;
-                tex->adjust=(tex->width!=tex->nwidth || tex->height!=tex->nheight);
+                LOGD("LIBGL: Recreate a texture for a FBO (%s%s%s)\n", (need_change&1)?"POT":"", (need_change==3)?" & ":"", (need_change&2)?"Float":"");
+                if(need_change&1) {
+                    twidth = tex->nwidth = npot(tex->nwidth);
+                    theight = tex->nheight = npot(tex->nheight);
+                    tex->adjustxy[0] = (float)tex->width / tex->nwidth;
+                    tex->adjustxy[1] = (float)tex->height / tex->nheight;
+                    tex->adjust=(tex->width!=tex->nwidth || tex->height!=tex->nheight);
+                }
                 int oldactive = glstate->texture.active;
                 if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
                 gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
@@ -352,17 +469,75 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                 gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
                 if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
             }*/
-            if (attachment == GL_COLOR_ATTACHMENT0)
-                attach_fbotexture(glstate->fbo.current_fb, tex->texture, tex->width, tex->height);    // track the attached texture for glBlitFramebuffer
+
+            fb->width  = twidth;
+            fb->height = theight;
+
             DBG(printf("found texture, glname=%u, size=%ix%i(%ix%i), format/type=%s/%s\n", texture, tex->width, tex->height, tex->nwidth, tex->nheight, PrintEnum(tex->format), PrintEnum(tex->type));)
         }
     }
     
     GLenum ntarget = ReadDraw_Push(target);
 
+    GLuint old_attachment = GetAttachment(fb, attachment);
+    GLuint old_attachment_type = GetAttachmentType(fb, attachment);
+    if(old_attachment) {
+        gltexture_t* old = gl4es_getTexture(old_attachment_type, old_attachment);
+        if(old) {
+            DBG(printf("Detach Texture %d from FBO %d as Attachement %s\n", old->glname, old->binded_fbo, PrintEnum(old->binded_attachment));)
+            old->binded_fbo = 0;
+            old->binded_attachment = 0;
+        } else {
+            DBG(printf("Old attachement %s for FBO %d not found in textures\n", PrintEnum(attachment), fb->id);)
+        }
+    }
+
     if(tex) {
-        tex->binded_fbo = glstate->fbo.current_fb;
+        DBG(printf("Attach Texture %d to FBO %d as Attachement %s\n", tex->glname, fb->id, PrintEnum(attachment));)
+        tex->binded_fbo = fb->id;
         tex->binded_attachment = attachment;
+    }
+
+    if ((old_attachment_type == textarget) && (old_attachment == (tex?tex->texture:texture)))
+    {
+        // no need to reattach
+        noerrorShim();
+        return;
+    }
+
+    SetAttachment(fb, attachment, textarget, tex?tex->texture:texture, level);
+
+    if(attachment==GL_COLOR_ATTACHMENT0 && tex) {
+        int oldactive = glstate->texture.active;
+        gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
+        GLuint oldtex = bound->glname;
+        int changed = 0;
+        if((hardext.npot==1 || hardext.npot==2) && (!tex->wrap_s || !tex->wrap_t || !wrap_npot(tex->wrap_s) || !wrap_npot(tex->wrap_t))) {
+            changed = 1;
+            if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
+            if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
+            gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            tex->wrap_s = tex->wrap_t = GL_CLAMP_TO_EDGE;
+            tex->adjust = 0;
+        }
+        //npot==2 and 3 should support that, but let's ignore that for now and force no mipmap for texture attached to fbo...
+        if(!tex->min_filter || !minmag_npot(tex->min_filter)) {
+            if(!changed) {
+                if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
+                if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
+                changed = 1;
+            }
+            tex->min_filter = minmag_forcenpot(tex->min_filter);
+            gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, tex->min_filter);
+            tex->adjust = 0;
+            tex->mipmap_need = 0;
+            tex->mipmap_auto = 0;
+        }
+        if(changed) {
+            if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
+            if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
+        }
     }
 
     if(attachment==GL_DEPTH_ATTACHMENT /*&& hardext.depthtex==0*/) {
@@ -370,11 +545,12 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
         if (level!=0) return;
         if(hardext.depthtex && (tex || !texture)) {
             // depth texture supported!
-            //check if texture needs to be re-created ad true depth texture
-            if(tex && tex->format!=GL_DEPTH_COMPONENT) {
+            //check if texture needs to be re-created as true depth texture
+            if(tex && !(tex->format==GL_DEPTH_COMPONENT || tex->format==GL_DEPTH_STENCIL)) {
                 tex->format = GL_DEPTH_COMPONENT;
                 if(tex->type!=GL_UNSIGNED_INT && tex->type!=GL_UNSIGNED_SHORT && tex->type!=GL_FLOAT) tex->type = (hardext.depth24)?GL_UNSIGNED_INT:GL_UNSIGNED_SHORT;
                 tex->fpe_format = FPE_TEX_DEPTH;
+                realize_textures();
                 int oldactive = glstate->texture.active;
                 if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
                 gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
@@ -382,6 +558,8 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                 if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
                 gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                 gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
                 if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
                 if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
@@ -397,6 +575,72 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                 gl4es_glBindRenderbuffer(GL_RENDERBUFFER, 0);
             }
             gl4es_glFramebufferRenderbuffer(ntarget, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, tex?tex->renderdepth:0);
+        }
+        errorGL();
+        ReadDraw_Pop(target);
+        return;
+    }
+    if(attachment==GL_STENCIL_ATTACHMENT /*&& hardext.depthtex==0*/) {
+        noerrorShim();
+        if (level!=0) return;
+        // this one is tricky, as it can be GL_DEPTH_STENCIL with DEPTH+DEPTH_STENCIL extension of GL_STENCIL_INDEX8 with STENCIL extension
+        // and having DEPTH+DEPTH_STENCIL extension doesn't grant STENCIL8 texture extension!
+        if((tex || !texture) && (hardext.stenciltex || (hardext.depthtex && hardext.depthstencil))) {
+            // depth texture supported, so are stencil one then!
+            //check if texture needs to be re-created as true depth texture
+            if(tex && !(tex->format==GL_STENCIL_INDEX8 || tex->format==GL_DEPTH_STENCIL)) {
+                if(tex->format==GL_DEPTH_ATTACHMENT) {
+                    //TODO: need to create a new texture, as the depth one is probably used
+                    gl4es_glGenTextures(1, &texture);
+                    realize_textures();
+                    int oldactive = glstate->texture.active;
+                    if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
+                    gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
+                    GLuint oldtex = bound->glname;
+                    int nwidth = tex->nwidth;
+                    int nheight = tex->nheight;
+                    tex = gl4es_getTexture(textarget, texture);
+                    if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                    tex->format = (hardext.stenciltex)?GL_STENCIL_INDEX8:GL_DEPTH_STENCIL;
+                    tex->type = (hardext.stenciltex)?GL_UNSIGNED_BYTE:GL_UNSIGNED_INT_24_8;
+                    gl4es_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, nwidth, nheight, 0, tex->format, tex->type, NULL);
+                    if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
+                    if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
+                } else {
+                    tex->format = GL_STENCIL_INDEX8;
+                    if(tex->type!=GL_UNSIGNED_BYTE && tex->type!=GL_UNSIGNED_SHORT && tex->type!=GL_FLOAT) tex->type = GL_UNSIGNED_BYTE;
+                    tex->fpe_format = FPE_TEX_DEPTH;
+                    realize_textures();
+                    int oldactive = glstate->texture.active;
+                    if(oldactive) gles_glActiveTexture(GL_TEXTURE0);
+                    gltexture_t *bound = glstate->texture.bound[0/*glstate->texture.active*/][ENABLED_TEX2D];
+                    GLuint oldtex = bound->glname;
+                    if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                    gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
+                    if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
+                    if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
+                }
+            }
+            // bind the stencil texture...
+            gles_glFramebufferTexture2D(ntarget, attachment, GL_TEXTURE_2D, texture, 0);
+        } else {
+            // let's create a renderbuffer and attach it instead of the (presumably) stencil texture
+            if(tex && !tex->renderstencil) {
+                gl4es_glGenRenderbuffers(1, &tex->renderstencil);
+                gl4es_glBindRenderbuffer(GL_RENDERBUFFER, tex->renderstencil);
+                gl4es_glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, twidth, theight);
+                gl4es_glBindRenderbuffer(GL_RENDERBUFFER, 0);
+            }
+            gl4es_glFramebufferRenderbuffer(ntarget, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, tex?tex->renderstencil:0);
         }
         errorGL();
         ReadDraw_Pop(target);
@@ -419,6 +663,8 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                     if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
                     gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                     gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                     gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
                     if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
                     if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
@@ -451,6 +697,8 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
                     if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, tex->glname);
                     gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                     gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                     gles_glTexImage2D(GL_TEXTURE_2D, 0, tex->format, tex->nwidth, tex->nheight, 0, tex->format, tex->type, NULL);
                     if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
                     if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
@@ -509,11 +757,11 @@ void gl4es_glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum texta
 }
 
 void gl4es_glFramebufferTexture1D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,	GLint level) {
-    gl4es_glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture, level);
+    gl4es_glFramebufferTexture2D(target, attachment, textarget, texture, level);
 }
 void gl4es_glFramebufferTexture3D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,	GLint level, GLint layer) {
     (void)layer;
-    gl4es_glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture, level);
+    gl4es_glFramebufferTexture2D(target, attachment, textarget, texture, level);
 }
 
 void gl4es_glGenRenderbuffers(GLsizei n, GLuint *renderbuffers) {
@@ -538,32 +786,45 @@ void gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum re
     LOAD_GLES2_OR_OES(glFramebufferRenderbuffer);
     LOAD_GLES2_OR_OES(glGetFramebufferAttachmentParameteriv);
     LOAD_GLES(glGetError);
+
+    glframebuffer_t *fb = get_framebuffer(target);
+    if(!fb) {
+        errorShim(GL_INVALID_ENUM);
+        return;
+    }
+
+    // Ignore Color attachment 1 .. 9
+    if ((attachment>=GL_COLOR_ATTACHMENT0+1) && (attachment<=GL_COLOR_ATTACHMENT0+9)) {
+        errorShim(GL_INVALID_ENUM);
+        return;
+    }
+
+    if( attachment!=GL_COLOR_ATTACHMENT0 
+     && attachment!=GL_DEPTH_ATTACHMENT 
+     && attachment!=GL_STENCIL_ATTACHMENT 
+     && attachment!=GL_DEPTH_STENCIL_ATTACHMENT) {
+         errorShim(GL_INVALID_ENUM);
+         return;
+     }
+    
     // get renderbuffer
     glrenderbuffer_t *rend = find_renderbuffer(renderbuffer);
-    if(renderbuffer && !rend) {
+    if(!rend /*|| !rend->renderbuffer*/) {
         errorShim(GL_INVALID_OPERATION);
         return;
     }
 
     if (attachment == GL_COLOR_ATTACHMENT0 && globals4es.fboforcetex) {
-        if(rend) {
+        if(rend->renderbuffer) {
             // drop the renderbuffer attachement and create a texture instead...
             int oldactive = glstate->texture.active;
             if(oldactive) gl4es_glActiveTexture(GL_TEXTURE0);
             gltexture_t *bound = glstate->texture.bound[0][ENABLED_TEX2D];
             GLuint oldtex = bound->glname;
             // get size of renderbuffer
-            LOAD_GLES2_OR_OES(glGetRenderbufferParameteriv);
-            GLint width, height;
-            GLenum format;
-            glrenderbuffer_t *oldrenderbuffer = glstate->fbo.current_rb;
-            GLuint oldrender = oldrenderbuffer?oldrenderbuffer->renderbuffer:0;
-            if(oldrender != renderbuffer) gl4es_glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
-            // TODO: keep track of Renderbuffer parameter, to avoid querying geometry
-            gles_glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width);
-            gles_glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height);
-            gles_glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &format);
-            if(oldrender != renderbuffer) gl4es_glBindRenderbuffer(GL_RENDERBUFFER, oldrender);
+            GLenum format = rend->format;
+            GLint width = rend->width;
+            GLint height = rend->height;
             // create a texture if needed
             if(!rend->secondarytexture) {
                 GLuint newtex;
@@ -587,18 +848,30 @@ void gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum re
         return;
     }
 
-    if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
-        // doesn't seems to be supported "as-is" on GLES
+    if (attachment==GL_DEPTH_STENCIL_ATTACHMENT) {
+        // doesn't seems to be supported "as-is" on GLES on PVR
         gl4es_glFramebufferRenderbuffer(target, GL_DEPTH_ATTACHMENT, renderbuffertarget, renderbuffer);
         gl4es_glFramebufferRenderbuffer(target, GL_STENCIL_ATTACHMENT, renderbuffertarget, renderbuffer);
         return;
     }
+
     
     //TODO: handle target=READBUFFER or DRAWBUFFER...
     if (attachment==GL_STENCIL_ATTACHMENT) {
         if(rend && rend->secondarybuffer)
             renderbuffer = rend->secondarybuffer;
     }
+
+    fb->width  = rend->width;
+    fb->height = rend->height;
+    if ((GetAttachmentType(fb, attachment) == GL_RENDERBUFFER) && (GetAttachment(fb, attachment)==renderbuffer))
+    {
+        // no need to reattach
+        noerrorShim();
+        return;
+    }
+
+    SetAttachment(fb, attachment, GL_RENDERBUFFER, renderbuffer, 0);
 
     /*if ((glstate->fbo.current_fb!=0) && (renderbuffer==0)) {
         //Hack, avoid unbind a renderbuffer on a framebuffer...
@@ -608,25 +881,6 @@ void gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum re
     }*/ // Let it do it now
     
     GLenum ntarget = ReadDraw_Push(target);
-
-    // TODO: remove this when tracking of FBO is done...
-    if ((glstate->fbo.current_fb!=0) && (renderbuffer!=0) && ((attachment==GL_DEPTH_ATTACHMENT) || (attachment==GL_STENCIL_ATTACHMENT))) {
-        GLuint tmp;
-        gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &tmp);
-        if(tmp==GL_RENDERBUFFER) {
-            gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &tmp);
-            GLenum err = gles_glGetError();
-            if (tmp==renderbuffer && err!=GL_NO_ERROR) {
-                noerrorShim();
-                ReadDraw_Pop(target);
-                return;
-            }
-        }
-    }
-
-    if(attachment == GL_COLOR_ATTACHMENT0) {
-        detach_fbotexture(glstate, glstate->fbo.current_fb); // remove texture attachement if there was one
-    }
 
     errorGL();
     gles_glFramebufferRenderbuffer(ntarget, attachment, renderbuffertarget, renderbuffer);
@@ -654,8 +908,8 @@ void gl4es_glDeleteRenderbuffers(GLsizei n, GLuint *renderbuffers) {
                             gles_glDeleteRenderbuffers(1, &rend->secondarybuffer);
                         if(rend->secondarytexture)
                             gl4es_glDeleteTextures(1, &rend->secondarytexture);
-                        kh_del(renderbufferlist_t, glstate->fbo.renderbufferlist, k);
                         free(rend);
+                        kh_del(renderbufferlist_t, glstate->fbo.renderbufferlist, k);
                     }
                 }
             }
@@ -672,7 +926,7 @@ void gl4es_glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei w
     LOAD_GLES2_OR_OES(glBindRenderbuffer);
 
     glrenderbuffer_t *rend = glstate->fbo.current_rb;
-    if(!rend) {
+    if(!rend->renderbuffer) {
         errorShim(GL_INVALID_OPERATION);
         return;
     }
@@ -682,11 +936,12 @@ void gl4es_glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei w
     height = (hardext.npot>0 && !globals4es.potframebuffer)?height:npot(height);
     int use_secondarybuffer = 0;
     int use_secondarytexture = 0;
+    GLenum format = internalformat;
     // check if internal format is GL_DEPTH_STENCIL_EXT
     if (internalformat == GL_DEPTH_STENCIL)
         internalformat = GL_DEPTH24_STENCIL8;
     // in that case, create first a STENCIL one then a DEPTH one....
-    if ((internalformat == GL_DEPTH24_STENCIL8) && (hardext.depthstencil==0)) {
+    if ((internalformat == GL_DEPTH24_STENCIL8 && (hardext.depthstencil==0 || (hardext.vendor&VEND_IMGTEC==VEND_IMGTEC)))) {
         khint_t k;
         int ret;
         internalformat = (hardext.depth24)?GL_DEPTH_COMPONENT24:GL_DEPTH_COMPONENT16;
@@ -702,10 +957,16 @@ void gl4es_glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei w
         internalformat = GL_RGB565_OES;
     else if (internalformat == GL_RGBA8 && hardext.rgba8==0)
         internalformat = GL_RGBA4_OES;
+    else if (internalformat == GL_RGBA) {
+        if(hardext.rgba8==0)
+            internalformat = GL_RGBA8;
+        else
+            internalformat = GL_RGBA4_OES;
+    }
 
     if(rend->secondarybuffer) {
         if(use_secondarybuffer) {
-            GLuint current_rb = glstate->fbo.current_rb?glstate->fbo.current_rb->renderbuffer:0;
+            GLuint current_rb = glstate->fbo.current_rb->renderbuffer;
             gles_glBindRenderbuffer(GL_RENDERBUFFER, rend->secondarybuffer);
             gles_glRenderbufferStorage(target, GL_STENCIL_INDEX8, width, height);
             gles_glBindRenderbuffer(GL_RENDERBUFFER, current_rb);
@@ -734,6 +995,11 @@ void gl4es_glRenderbufferStorage(GLenum target, GLenum internalformat, GLsizei w
         if(oldactive) gles_glActiveTexture(GL_TEXTURE0+oldactive);
     }
 
+    rend->width  = width;
+    rend->height = height;
+    rend->format = format;
+    rend->actual = internalformat;
+
     gles_glRenderbufferStorage(target, internalformat, width, height);
     DBG(CheckGLError(1);)
 }
@@ -743,16 +1009,16 @@ void gl4es_glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLen
 }
 
 void gl4es_glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
-    DBG(printf("glBindRenderbuffer(%s, %u), binded Fbo=%u\n", PrintEnum(target), renderbuffer, glstate->fbo.current_fb);)
+    DBG(printf("glBindRenderbuffer(%s, %u), binded Fbo=%u\n", PrintEnum(target), renderbuffer, glstate->fbo.current_fb->id);)
     LOAD_GLES2_OR_OES(glBindRenderbuffer);
     
-    GLuint current = (glstate->fbo.current_rb)?glstate->fbo.current_rb->renderbuffer:0;
+    GLuint current = glstate->fbo.current_rb->renderbuffer;
     if(current==renderbuffer) {
         noerrorShim();
         return;
     }
      glrenderbuffer_t * rend = find_renderbuffer(renderbuffer);
-    if(renderbuffer && !rend) {
+    if(!rend || !rend->renderbuffer) {
         errorShim(GL_INVALID_OPERATION);
         return;
     }
@@ -764,9 +1030,6 @@ void gl4es_glBindRenderbuffer(GLenum target, GLuint renderbuffer) {
 
 GLboolean gl4es_glIsRenderbuffer(GLuint renderbuffer) {
     DBG(printf("glIsRenderbuffer(%u)\n", renderbuffer);)
-    if(!renderbuffer)
-        return GL_TRUE;
-
     noerrorShim();
     return((find_renderbuffer(renderbuffer)!=NULL)?GL_TRUE:GL_FALSE);
 }
@@ -791,18 +1054,75 @@ void gl4es_glGenerateMipmap(GLenum target) {
 void gl4es_glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLenum pname, GLint *params) {
     DBG(printf("glGetFramebufferAttachmentParameteriv(%s, %s, %s, %p)\n", PrintEnum(target), PrintEnum(attachment), PrintEnum(pname), params);)
     LOAD_GLES2_OR_OES(glGetFramebufferAttachmentParameteriv);
-    
-    GLenum ntarget = ReadDraw_Push(target);
-    // hack to return DEPTH size
-    if(ntarget==GL_FRAMEBUFFER && attachment==GL_DEPTH_ATTACHMENT && pname==GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE && hardext.depthtex==0) {
-        errorGL();
-        gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, params);
-        //TODO: Check all this?!
-        if (params)
-            *params = 16;   //Depth buffer is 16 on GLES. No check for 24 bits here...
-        ReadDraw_Pop(target);
+
+    glframebuffer_t *fb = get_framebuffer(target);
+    if(!fb) {
+        errorShim(GL_INVALID_ENUM);
         return;
     }
+
+    if( attachment!=GL_COLOR_ATTACHMENT0 
+     && attachment!=GL_DEPTH_ATTACHMENT 
+     && attachment!=GL_STENCIL_ATTACHMENT 
+     && attachment!=GL_DEPTH_STENCIL_ATTACHMENT) {
+         errorShim(GL_INVALID_ENUM);
+         return;
+    }
+
+    if(pname==GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME) {
+        noerrorShim();
+        *params = GetAttachment(fb, attachment);
+        return;
+    }
+
+    if(pname==GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE) {
+        noerrorShim();
+        *params = GetAttachmentType(fb, attachment);
+        if(*params!=0 && *params!=GL_RENDERBUFFER)
+            *params = GL_TEXTURE;
+        return;
+    }
+    
+    if(pname==GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL) {
+        GLenum tmp = GetAttachmentType(fb, attachment);
+        if(tmp!=0 && tmp!=GL_RENDERBUFFER) {
+            noerrorShim();
+            *params = GetAttachmentLevel(fb, attachment);
+        } else {
+            errorShim(GL_INVALID_ENUM);
+        }
+        return;
+    }
+    if(pname==GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE) {
+        GLenum tmp = GetAttachmentType(fb, attachment);
+        if(tmp!=0 && tmp!=GL_RENDERBUFFER) {
+            noerrorShim();
+            *params = (tmp>=GL_TEXTURE_CUBE_MAP_POSITIVE_X && tmp<=GL_TEXTURE_CUBE_MAP_NEGATIVE_Z)?tmp:0;
+        } else {
+            errorShim(GL_INVALID_ENUM);
+        }
+        return;        
+    }
+    // more stuff can be done
+    /*
+    if(pname==GL_FRAMEBUFFER_ATTACHMENT_LAYERED) {
+        GLenum tmp = GetAttachmentType(fb, attachment);
+        noerrorShim();
+        *params = (tmp==GL_TEXTURE_CUBE_MAP || tmp==GL_TEXTURE_3D)?GL_TRUE:GL_FALSE;
+        return;
+    }
+    */
+    // hack to return DEPTH size
+    if(attachment==GL_DEPTH_ATTACHMENT && pname==GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE && hardext.depthtex==0) {
+        errorGL();
+        *params = GetAttachment(fb, attachment);
+        //TODO: Check all this?!
+        if (*params)
+            *params = 16;   //Depth buffer is 16 on GLES. No check for 24 bits here...
+        return;
+    }
+
+    GLenum ntarget = ReadDraw_Push(target);
     
     errorGL();
     gles_glGetFramebufferAttachmentParameteriv(ntarget, attachment, pname, params);
@@ -835,10 +1155,12 @@ void createMainFBO(int width, int height) {
     LOAD_GLES(glClear);
 
     // If there is already a Framebuffer created, let's delete it.... unless it's already the right size!
+    int createIt = 1;
     if (glstate->fbo.mainfbo_fbo) {
         if (width==glstate->fbo.mainfbo_width && height==glstate->fbo.mainfbo_height)
             return;
-        deleteMainFBO(glstate);
+        //lets adjust the FBO instead of adjusting it
+        createIt = 0;
     }
     DBG(printf("LIBGL: Create FBO of %ix%i 32bits\n", width, height);)
     // switch to texture unit 0 if needed
@@ -853,32 +1175,38 @@ void createMainFBO(int width, int height) {
     glstate->fbo.mainfbo_nheight = height = hardext.npot>0?height:npot(height);
 
     // create the texture
-	gles_glGenTextures(1, &glstate->fbo.mainfbo_tex);
+    if(createIt)
+	    gles_glGenTextures(1, &glstate->fbo.mainfbo_tex);
     gles_glBindTexture(GL_TEXTURE_2D, glstate->fbo.mainfbo_tex);
-    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if(createIt) {
+        gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        gles_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     gles_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height,
 					0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	gles_glBindTexture(GL_TEXTURE_2D, 0);
     // create the render buffers
-	gles_glGenRenderbuffers(1, &glstate->fbo.mainfbo_dep);
-	gles_glGenRenderbuffers(1, &glstate->fbo.mainfbo_ste);
+    if(createIt) {
+        gles_glGenRenderbuffers(1, &glstate->fbo.mainfbo_dep);
+        gles_glGenRenderbuffers(1, &glstate->fbo.mainfbo_ste);
+    }
     gles_glBindRenderbuffer(GL_RENDERBUFFER, glstate->fbo.mainfbo_ste);
     gles_glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, width, height);
     gles_glBindRenderbuffer(GL_RENDERBUFFER, glstate->fbo.mainfbo_dep);
     gles_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height);
     gles_glBindRenderbuffer(GL_RENDERBUFFER, 0);
     // create a fbo
-    gles_glGenFramebuffers(1, &glstate->fbo.mainfbo_fbo);
+    if(createIt)
+        gles_glGenFramebuffers(1, &glstate->fbo.mainfbo_fbo);
     gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.mainfbo_fbo);
     
+    // re-attach, even if not creating the fbo...
     gles_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, glstate->fbo.mainfbo_ste);
     gles_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, glstate->fbo.mainfbo_dep);
     
     gles_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glstate->fbo.mainfbo_tex, 0);
-    attach_fbotexture(glstate->fbo.mainfbo_fbo, glstate->fbo.mainfbo_tex, glstate->fbo.mainfbo_width, glstate->fbo.mainfbo_height);
 
 	GLenum status = gles_glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
@@ -890,18 +1218,18 @@ void createMainFBO(int width, int height) {
         gles_glActiveTexture(GL_TEXTURE0 + glstate->texture.active);
     if (glstate->texture.client != 0 && gles_glClientActiveTexture)
         gles_glClientActiveTexture(GL_TEXTURE0 + glstate->texture.client);
-    GLuint current_rb = glstate->fbo.current_rb?glstate->fbo.current_rb->renderbuffer:0;
+    GLuint current_rb = glstate->fbo.current_rb->renderbuffer;
     gles_glBindRenderbuffer(GL_RENDERBUFFER, current_rb);
     // Final check, and bind the fbo for future use
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         printf("LIBGL: Error while creating main fbo (0x%04X)\n", status);
         deleteMainFBO(glstate);
-        gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.current_fb);
+        gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.current_fb->id);
         
     } else {
-        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb)?glstate->fbo.current_fb:glstate->fbo.mainfbo_fbo);
+        gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb->id)?glstate->fbo.current_fb->id:glstate->fbo.mainfbo_fbo);
         // clear color, depth and stencil...
-        if (glstate->fbo.current_fb==0)
+        if (glstate->fbo.current_fb->id==0)
             gles_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     }
     
@@ -919,15 +1247,15 @@ void blitMainFBO(int x, int y, int width, int height) {
 
     GLint vp[4];
     memcpy(vp, &glstate->raster.viewport, sizeof(vp));
-    gl4es_glViewport(0, 0, glstate->fbo.mainfbo_width, glstate->fbo.mainfbo_height);
+    gl4es_glViewport(0, 0, glstate->fbowidth, glstate->fboheight);
     float rx, ry;
     if(!width && !height) {
         width = glstate->fbo.mainfbo_width;
         height = glstate->fbo.mainfbo_height;
         rx = ry = 1.0f;
     } else {
-        //y = glstate->fbo.mainfbo_height - (y+height);
-        y = -y;
+        y = glstate->fboheight - (y+height);
+        //y = - y;
         rx = (float)width/glstate->fbo.mainfbo_width;
         ry = (float)height/glstate->fbo.mainfbo_height;
     }
@@ -944,9 +1272,9 @@ void bindMainFBO() {
     LOAD_GLES2_OR_OES(glCheckFramebufferStatus);
     if (!glstate->fbo.mainfbo_fbo)
         return;
-    if (glstate->fbo.current_fb==0) {
+    if (glstate->fbo.current_fb->id==0) {
         gles_glBindFramebuffer(GL_FRAMEBUFFER, glstate->fbo.mainfbo_fbo);
-        gles_glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        //gles_glCheckFramebufferStatus(GL_FRAMEBUFFER);
     }
 }
 
@@ -954,8 +1282,7 @@ void unbindMainFBO() {
     LOAD_GLES2_OR_OES(glBindFramebuffer);
     if (!glstate->fbo.mainfbo_fbo)
         return;
-    if (glstate->fbo.current_fb==0) {
-        GLuint pixel;
+    if (glstate->fbo.current_fb->id==0) {
         gles_glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 }
@@ -967,7 +1294,6 @@ void deleteMainFBO(void *state) {
 
     glstate_t *glstate = (glstate_t*)state;
 
-    detach_fbotexture(glstate, glstate->fbo.mainfbo_fbo);
     if (glstate->fbo.mainfbo_dep) {
         gles_glDeleteRenderbuffers(1, &glstate->fbo.mainfbo_dep);
         glstate->fbo.mainfbo_dep = 0;
@@ -989,7 +1315,7 @@ void deleteMainFBO(void *state) {
 }
 
 void gl4es_glFramebufferTextureLayer(	GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer) {
-    gl4es_glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture,	level); // Force Texture2D, ignore layer...
+    gl4es_glFramebufferTexture2D(target, attachment, GL_TEXTURE_2D, texture,	level); // Force Texture2D, ignore layer (should track?)...
 }
 
 void gl4es_getMainFBSize(GLint* width, GLint* height);
@@ -998,7 +1324,7 @@ void gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
     // mask will be ignored
     // filter will be taken only for ReadFBO has no Texture attached (so readpixel is used)
     DBG(printf("glBlitFramebuffer(%d, %d, %d, %d,  %d, %d, %d, %d,  0x%04X, %s) fbo_read=%d, fbo_draw=%d\n",
-        srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, PrintEnum(filter), glstate->fbo.fbo_read, glstate->fbo.fbo_draw);)
+        srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, PrintEnum(filter), glstate->fbo.fbo_read->id, glstate->fbo.fbo_draw->id);)
 
     if((mask&GL_COLOR_BUFFER_BIT)==0)
         return; // cannot copy DEPTH or STENCIL data on GLES, only COLOR_BUFFER...
@@ -1011,8 +1337,8 @@ void gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
     if(srcX1==srcX0 || srcY1==srcY0)
         return; // nothing to draw
 
-    GLuint texture = 0;
-    find_fbotexture(glstate->fbo.fbo_read, &texture, NULL, NULL);
+    GLuint texture = (glstate->fbo.fbo_read->id==0 && glstate->fbo.mainfbo_fbo)?glstate->fbo.mainfbo_tex:glstate->fbo.fbo_read->color[0];
+
     int created = (texture==0 || (glstate->fbo.fbo_read==glstate->fbo.fbo_draw));
     int oldtex = glstate->texture.active;
     if (oldtex)
@@ -1051,25 +1377,15 @@ void gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
     float zoomy = ((float)(dstY1-dstY0))/srcH;
     // get the width / height of write FBO
     int fbowidth, fboheight;
-    if(glstate->fbo.fbo_draw==glstate->fbo.mainfbo_fbo) {
+    if(glstate->fbo.fbo_draw->id==0/* && glstate->fbo.mainfbo_fbo*/) {
         fbowidth = glstate->fbo.mainfbo_width;
         fboheight = glstate->fbo.mainfbo_height;
         if(glstate->fbo.mainfbo_width!=dstX1 || glstate->fbo.mainfbo_height!=dstY1) {
             gl4es_getMainFBSize(&glstate->fbo.mainfbo_width, &glstate->fbo.mainfbo_height);
         }
     } else {
-        if (!find_fbotexture(glstate->fbo.fbo_draw, NULL, &fbowidth, &fboheight)) {
-            // not found, get width/height from Hardware
-            GLuint renderbuff;
-            gl4es_glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &renderbuff);
-            GLuint old = glstate->fbo.current_rb?glstate->fbo.current_rb->renderbuffer:0;
-            gl4es_glBindRenderbuffer(GL_RENDERBUFFER, renderbuff);
-            gl4es_glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &fbowidth);
-            gl4es_glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &fboheight);
-            gl4es_glBindRenderbuffer(GL_RENDERBUFFER, old);
-            // save value, to not query it each time
-            attach_fbotexture(glstate->fbo.fbo_draw, 0, fbowidth, fboheight);
-        }
+        fbowidth  = glstate->fbo.fbo_draw->width;
+        fboheight = glstate->fbo.fbo_draw->height;
     }
     GLint vp[4];
     memcpy(vp, &glstate->raster.viewport, sizeof(vp));
@@ -1085,12 +1401,12 @@ void gl4es_glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
 }
 
 GLuint gl4es_getCurrentFBO() {
-  return (glstate->fbo.current_fb)?glstate->fbo.current_fb:glstate->fbo.mainfbo_fbo;
+  return (glstate->fbo.current_fb->id)?glstate->fbo.current_fb->id:glstate->fbo.mainfbo_fbo;
 }
 
 void gl4es_setCurrentFBO() {
   LOAD_GLES2_OR_OES(glBindFramebuffer);
-  gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb)?glstate->fbo.current_fb:glstate->fbo.mainfbo_fbo);
+  gles_glBindFramebuffer(GL_FRAMEBUFFER, (glstate->fbo.current_fb->id)?glstate->fbo.current_fb->id:glstate->fbo.mainfbo_fbo);
 }
 
 // direct wrapper

@@ -1,7 +1,7 @@
-#include <string.h>
-#include <stdlib.h>
-
 #include "fpe_shader.h"
+
+#include <stdio.h>
+
 #include "string_utils.h"
 #include "init.h"
 #include "../glx/hardext.h"
@@ -224,15 +224,22 @@ const char* const* fpe_VertexShader(fpe_state_t *state) {
         ShadAppend(buff);
         headers += CountLine(buff);
 
-        if(!color_material || !state->cm_front_mode==FPE_CM_DIFFUSE || !state->cm_back_mode==FPE_CM_AMBIENTDIFFUSE) {
+        if(!(cm_front_nullexp && color_material)) {
             ShadAppend("uniform highp float _gl4es_FrontMaterial_shininess;\n");
+            headers++;
+        }
+        if(twosided && !(cm_back_nullexp && color_material)) {
+            ShadAppend("uniform highp float _gl4es_BackMaterial_shininess;\n");
+            headers++;
+        }
+        if(!(color_material && (state->cm_front_mode==FPE_CM_DIFFUSE || state->cm_front_mode==FPE_CM_AMBIENTDIFFUSE))) {
             ShadAppend("uniform highp float _gl4es_FrontMaterial_alpha;\n");
-            headers+=2;
-            if(twosided)
-                ShadAppend("uniform highp float _gl4es_BackMaterial_shininess;\n");
+            headers++;
+            if(twosided) {
                 ShadAppend("uniform highp float _gl4es_BackMaterial_alpha;\n");
-                headers+=2;
+                headers++;
             }
+        }
         for(int i=0; i<hardext.maxlights; i++) {
             if(state->light&(1<<i)) {
                 sprintf(buff, "uniform _gl4es_FPELightSourceParameters%d _gl4es_LightSource_%d;\n", (state->light_direction>>i&1)?1:0, i);
@@ -561,10 +568,10 @@ const char* const* fpe_VertexShader(fpe_state_t *state) {
                 sprintf(texcoord, "gl_MultiTexCoord%d", i);
             }
             if(mat) {
+                // it would be better to use texture2Dproj in fragment shader, but that will complicate the varying definition...
                 sprintf(buff, "tmp_tex = (_gl4es_TextureMatrix_%d * %s);\n", i, texcoord);
                 ShadAppend(buff);
                 sprintf(buff, "_gl4es_TexCoord_%d = tmp_tex.%s / tmp_tex.q;\n", i, texxyzsize[t-1]);
-                // it would be better to use texture2Dproj in fragment shader, but that will complicate the varying definition...
                 //sprintf(buff, "_gl4es_TexCoord_%d = (_gl4es_TextureMatrix_%d * %s).%s;\n", i, i, texcoord, texxyzsize[t-1]);
             } else
                 sprintf(buff, "_gl4es_TexCoord_%d = %s.%s / %s.q;\n", i, texcoord, texxyzsize[t-1], texcoord);

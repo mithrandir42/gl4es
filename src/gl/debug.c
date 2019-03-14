@@ -1,5 +1,12 @@
 #include "debug.h"
-#include "gl.h"
+
+#include <string.h>
+#include "wrap/gles.h"
+#include "const.h"
+#include "loader.h"
+#include "logs.h"
+#include "gl4es.h"
+#include "gles.h"
 
 #define p(a) \
     case a: return #a
@@ -60,16 +67,28 @@ const char* PrintEnum(GLenum what) {
         p(GL_LUMINANCE_ALPHA);
         p(GL_LUMINANCE4_ALPHA4);
         p(GL_LUMINANCE16_ALPHA16);
+        p(GL_LUMINANCE_ALPHA16F);
+        p(GL_LUMINANCE_ALPHA32F);
         p(GL_LUMINANCE);
         p(GL_ALPHA);
         p(GL_LUMINANCE8);
         p(GL_LUMINANCE16);
+        p(GL_LUMINANCE16F);
+        p(GL_LUMINANCE32F);
         p(GL_ALPHA8);
+        p(GL_ALPHA16F);
+        p(GL_ALPHA32F);
         p(GL_COMPRESSED_ALPHA);
         p(GL_COMPRESSED_LUMINANCE);
         p(GL_COMPRESSED_LUMINANCE_ALPHA);
         p(GL_COMPRESSED_RGB);
         p(GL_COMPRESSED_RGBA);
+        p(GL_HALF_FLOAT);
+        p(GL_INTENSITY);
+        p(GL_INTENSITY8);
+        p(GL_INTENSITY16F);
+        p(GL_INTENSITY32F);
+        p(GL_DEPTH_STENCIL);
         // type
         p(GL_BYTE);
         p(GL_UNSIGNED_BYTE);
@@ -87,15 +106,19 @@ const char* PrintEnum(GLenum what) {
         p(GL_UNSIGNED_INT_8_8_8_8);
         p(GL_FLOAT);
         p(GL_DOUBLE);
+        p(GL_UNSIGNED_INT_24_8);
         // texture infos
         p(GL_TEXTURE_WIDTH);
         p(GL_TEXTURE_HEIGHT);
         p(GL_TEXTURE_COMPRESSED);
         p(GL_TEXTURE_BORDER);
         p(GL_TEXTURE_INTERNAL_FORMAT);
+        p(GL_MAX_TEXTURE_SIZE);
+        p(GL_MAX_TEXTURE_COORDS);
         // texture pack/unpack
         p(GL_UNPACK_ALIGNMENT);
         p(GL_PACK_ALIGNMENT);
+        p(GL_UNPACK_ROW_LENGTH);
         // framebuffer
         p(GL_COLOR_ATTACHMENT0);
         p(GL_COLOR_ATTACHMENT1);
@@ -103,8 +126,10 @@ const char* PrintEnum(GLenum what) {
         p(GL_COLOR_ATTACHMENT3);
         p(GL_COLOR_ATTACHMENT4);
         p(GL_DEPTH_ATTACHMENT);
+        p(GL_DEPTH_STENCIL_ATTACHMENT);
         p(GL_STENCIL_ATTACHMENT);
         p(GL_DEPTH_COMPONENT);
+        p(GL_DEPTH24_STENCIL8);
         p(GL_MAX_DRAW_BUFFERS_ARB);
         // VBO
         p(GL_STATIC_DRAW);
@@ -232,6 +257,7 @@ const char* PrintEnum(GLenum what) {
         p(GL_SHADER_TYPE);
         p(GL_DELETE_STATUS);
         p(GL_LINK_STATUS);
+        p(GL_COMPILE_STATUS);
         p(GL_VALIDATE_STATUS);
         p(GL_ATTACHED_SHADERS);
         p(GL_ACTIVE_UNIFORMS);
@@ -243,6 +269,7 @@ const char* PrintEnum(GLenum what) {
         p(GL_PROGRAM_BINARY_LENGTH);
         p(GL_NUM_PROGRAM_BINARY_FORMATS);
         p(GL_PROGRAM_BINARY_FORMATS);
+        p(GL_INFO_LOG_LENGTH);
         // Client State
         p(GL_VERTEX_ARRAY);
         p(GL_COLOR_ARRAY);

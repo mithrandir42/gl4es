@@ -1,7 +1,8 @@
-#include "gl.h"
+#ifndef _GL4ES_EVAL_H_
+#define _GL4ES_EVAL_H_
 
-#ifndef GL_MAP_H
-#define GL_MAP_H
+#include "const.h"
+#include "gles.h"
 
 void gl4es_glMap1d(GLenum target, GLdouble u1, GLdouble u2, GLint stride, GLint order, const GLdouble *points);
 void gl4es_glMap1f(GLenum target, GLfloat u1, GLfloat u2, GLint stride, GLint order, const GLfloat *points);
@@ -83,4 +84,4 @@ static const GLsizei get_map_width(GLenum target) {
     return 0;
 }
 
-#endif
+#endif // _GL4ES_EVAL_H_

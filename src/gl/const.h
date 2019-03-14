@@ -1,5 +1,5 @@
-#ifndef CONST_H
-#define CONST_H
+#ifndef _GL4ES_CONST_H_
+#define _GL4ES_CONST_H_
 
 #define GL_QUADS      7
 #define GL_QUAD_STRIP 8
@@ -67,6 +67,7 @@
 #define GL_TEXTURE_CUBE_MAP         0x8513
 #define GL_TEXTURE_GEN_STR          0x8D60
 #define GL_CLAMP_TO_BORDER          0x812D
+#define GL_MAX_TEXTURE_COORDS       0x8871
 
 #define GL_TEXTURE_COMPARE_MODE     0x884C
 
@@ -161,21 +162,29 @@
 #define GL_ALPHA8				       0x803C
 #define GL_ALPHA12				       0x803D
 #define GL_ALPHA16				       0x803E
+#define GL_ALPHA16F                    0x881C
+#define GL_ALPHA32F                    0x8816
 #define GL_LUMINANCE4				   0x803F
 #define GL_LUMINANCE8				   0x8040
 #define GL_LUMINANCE12				   0x8041
 #define GL_LUMINANCE16				   0x8042
+#define GL_LUMINANCE16F                0x881E
+#define GL_LUMINANCE32F                0x8818
 #define GL_LUMINANCE4_ALPHA4		   0x8043
 #define GL_LUMINANCE6_ALPHA2		   0x8044
 #define GL_LUMINANCE8_ALPHA8		   0x8045
 #define GL_LUMINANCE12_ALPHA4		   0x8046
 #define GL_LUMINANCE12_ALPHA12		   0x8047
 #define GL_LUMINANCE16_ALPHA16		   0x8048
+#define GL_LUMINANCE_ALPHA16F          0x881F
+#define GL_LUMINANCE_ALPHA32F          0x8819
 #define GL_INTENSITY				   0x8049
 #define GL_INTENSITY4				   0x804A
 #define GL_INTENSITY8				   0x804B
 #define GL_INTENSITY12				   0x804C
 #define GL_INTENSITY16				   0x804D
+#define GL_INTENSITY16F                0x881D
+#define GL_INTENSITY32F                0x8817
 #define GL_RGB10_A2                    0x8059
 #define GL_RGBA16F                     0x881A
 #define GL_RGB16F                      0x881B
@@ -192,6 +201,8 @@
 #define GL_COMPRESSED_RGB			   0x84ED
 #define GL_COMPRESSED_RGBA			   0x84EE
 #define GL_COMPRESSED_TEXTURE_FORMATS  0x86A3
+#define GL_HALF_FLOAT_OES              0x8D61
+#define GL_RGB565                      0x8D62
 
 // types
 #define GL_BYTE                 0x1400
@@ -205,6 +216,7 @@
 #define GL_3_BYTES              0x1408
 #define GL_4_BYTES              0x1409
 #define GL_DOUBLE               0x140A
+#define GL_HALF_FLOAT           0x140B
 #define GL_BITMAP               0x1A00
 
 #define GL_COMPILE              0x1300
@@ -272,6 +284,15 @@
 #define GL_LIGHT_MODEL_COLOR_CONTROL	0x81F8
 #define GL_SINGLE_COLOR		    0x81F9
 #define GL_SEPARATE_SPECULAR_COLOR		0x81FA
+
+// stencil
+#define GL_STENCIL_BACK_FUNC              0x8800
+#define GL_STENCIL_BACK_VALUE_MASK        0x8CA4
+#define GL_STENCIL_BACK_REF               0x8CA3
+#define GL_STENCIL_BACK_WRITEMASK         0x8CA5
+#define GL_STENCIL_BACK_FAIL              0x8801
+#define GL_STENCIL_BACK_PASS_DEPTH_FAIL   0x8802
+#define GL_STENCIL_BACK_PASS_DEPTH_PASS   0x8803
 
 // pixel transfer
 #define GL_MAP_COLOR             0x0D10
@@ -461,6 +482,7 @@
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT     0x83F1
 #define GL_COMPRESSED_RGBA_S3TC_DXT3_EXT     0x83F2
 #define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT     0x83F3
+#define GL_TEXTURE_COMPRESSION_HINT          0x84EF
 
 /* Render Mode */
 #define GL_SELECT                         0x1c02
@@ -738,4 +760,4 @@
 //GL_ARB_instanced_arrays
 #define GL_VERTEX_ATTRIB_ARRAY_DIVISOR          0x88FE
 
-#endif
+#endif // _GL4ES_CONST_H_

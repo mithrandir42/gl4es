@@ -1,3 +1,6 @@
+#ifndef _GLX_GLX_H_
+#define _GLX_GLX_H_
+
 #ifndef NOEGL
 #include <EGL/egl.h>
 #endif
@@ -10,7 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../gl/gl.h"
+#include "../gl/gl4es.h"
 
 // defines yoinked from Mesa glx.h
 #define GLX_VERSION_1_1     1
@@ -141,8 +144,11 @@
 #define GLX_CONTEXT_ES_PROFILE_BIT_EXT		    0x00000004
 #define GLX_CONTEXT_ES2_PROFILE_BIT_EXT		    0x00000004
 
-
-typedef int GLXDrawable;
+#ifdef NOX11
+typedef int GLXDrawable;    // need 64 / 32bits difs.
+#else
+typedef XID GLXDrawable;
+#endif
 #ifndef NOX11
 struct __GLXContextRec {
     Display *display;
@@ -152,7 +158,8 @@ struct __GLXContextRec {
     int currentReadable;
     XID xid;
 	EGLSurface eglSurface;
-	EGLConfig eglConfigs[1];
+	EGLConfig eglConfigs[64];
+    int eglconfigIdx;
 	EGLContext eglContext;
     int samples;
     int samplebuffers;
@@ -163,6 +170,8 @@ struct __GLXContextRec {
     int doublebuff;
     void* glstate;
     void* shared;
+    int* shared_eglsurface;
+    void* nativewin;
     int contextType;    // 0 = Window, 1 = PBuffer, 2 = PixmapBuffer, 3 = Emulated PixmapBuffer (with PBuffer)
 };
 typedef struct __GLXContextRec *GLXContext;
@@ -189,9 +198,11 @@ struct __GLXFBConfigRec {
     int optimalPbufferWidth, optimalPbufferHeight;  /* for SGIX_pbuffer */
 
     int visualSelectGroup;  /* visuals grouped by select priority */
-
-    unsigned int id;
-
+#ifndef NOEGL
+    EGLConfig id;
+#else
+    int       id;
+#endif
     unsigned char rgbMode;
     unsigned char colorIndexMode;
     unsigned char doubleBufferMode;
@@ -241,7 +252,7 @@ void gl4es_glXSwapInterval(int interval);
 // GLX 1.1?
 #ifndef NOX11
 Bool gl4es_glXIsDirect(Display * display, GLXContext ctx);
-Bool gl4es_glXMakeCurrent(Display *display, int drawable, GLXContext context);
+Bool gl4es_glXMakeCurrent(Display *display, GLXDrawable drawable, GLXContext context);
 Bool gl4es_glXQueryExtension(Display *display, int *errorBase, int *eventBase);
 Bool gl4es_glXQueryVersion(Display *display, int *major, int *minor);
 const char *gl4es_glXGetClientString(Display *display, int name);
@@ -253,7 +264,7 @@ GLXDrawable gl4es_glXGetCurrentDrawable();
 int gl4es_glXGetConfig(Display *display, XVisualInfo *visual, int attribute, int *value);
 void gl4es_glXCopyContext(Display *display, GLXContext src, GLXContext dst, GLuint mask);
 void gl4es_glXDestroyContext(Display *display, GLXContext ctx);
-void gl4es_glXSwapBuffers(Display *display, int drawable);
+void gl4es_glXSwapBuffers(Display *display, GLXDrawable drawable);
 void gl4es_glXUseXFont(Font font, int first, int count, int listBase);
 #endif //NOX11
 void gl4es_glXWaitGL();
@@ -289,4 +300,6 @@ GLXPixmap gl4es_glXCreateGLXPixmap(Display *display, XVisualInfo * visual, Pixma
 void gl4es_glXDestroyGLXPixmap(Display *display, void *pixmap);
 
 GLXContext gl4es_glXCreateContextAttribs(Display *dpy, GLXFBConfig config, GLXContext share_context, Bool direct, const int *attrib_list);
-#endif //NOX11
+#endif // NOX11
+
+#endif // _GLX_GLX_H

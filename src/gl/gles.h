@@ -1,5 +1,6 @@
-#ifndef _GLES_H_
-#define _GLES_H_
+#ifndef _GL4ES_GLES_H_
+#define _GL4ES_GLES_H_
+
 #include <GLES/glplatform.h>
 
 // Define for GLES 1.1
@@ -121,7 +122,6 @@ typedef char             GLcharARB;
 /* EnableCap */
 #define GL_FOG                            0x0B60
 #define GL_LIGHTING                       0x0B50
-#define GL_TEXTURE_2D                     0x0DE1
 #define GL_CULL_FACE                      0x0B44
 #define GL_ALPHA_TEST                     0x0BC0
 #define GL_BLEND                          0x0BE2
@@ -1109,5 +1109,4 @@ typedef struct __GLsync *GLsync;
 #define GL_MULTISAMPLE_BUFFER_BIT7_QCOM                         0x80000000
 #endif
 
-
-#endif //_GLES_H_
+#endif // _GL4ES_GLES_H_

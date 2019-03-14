@@ -23,6 +23,7 @@ typedef struct _agl_ctx_glstate {
 static agl_ctx_glstate *agl_context = NULL;
 static int agl_context_len = 0;
 static int agl_context_cap = 0;
+static void* agl_current_ctx = NULL;
 
 // find (or add if not found) a context in the list, and activate glstate...
 void agl_context_find(void* ctx) {
@@ -80,35 +81,47 @@ void agl_context_remove(void* ctx) {
 
 void* aglCreateContext(ULONG * errcode, struct TagItem * tags) {
     if(IOGLES2)
-        return IOGLES2->aglCreateContext(errcode, tags);
+        return IOGLES2->aglCreateContext2(errcode, tags);
     return NULL;
 }
-
+void* aglCreateContext2(ULONG * errcode, struct TagItem * tags) {
+    return aglCreateContext(errcode, tags);
+}
+/*
 void* VARARGS68K aglCreateContextTags(ULONG * errcode, ...) {
     void* ret = NULL;
     if(IOGLES2) {
         struct TagItem tags[100];
-        va_list args;
+        VA_LIST args;
+        VA_START(args, errcode);
         int i = 0;
         do {
-            struct Tagitem tag = va_arg(args, struct TagItem);
+            struct Tagitem tag = VA_ARG(args, struct TagItem);
             tags[i++] = tag;
         } while (tag!=TAG_DONE);
-        va_end(args);
-        ret = IOGLES2->aglCreateContext(errcode, tags);
+        VA_END(args);
+        ret = IOGLES2->aglCreateContext2(errcode, tags);
     }
     return ret;
 }
-
+*/
 void aglDestroyContext(void* context) {
     if(IOGLES2) {
-        IOGLES2->aglDestroyContext(context);
+        //bind the context before deleting stuffs.
+        if(context!=agl_current_ctx)
+            IOGLES2->aglMakeCurrent(context);
 
         agl_context_remove(context); // remove the associated glstate
+
+        if(context!=agl_current_ctx)    // rebind old context if needed
+            IOGLES2->aglMakeCurrent(agl_current_ctx);
+        IOGLES2->aglDestroyContext(context);
+
     }
 }
 
 void aglMakeCurrent(void* context) {
+    agl_current_ctx = context;
     if(IOGLES2) {
         IOGLES2->aglMakeCurrent(context);
 

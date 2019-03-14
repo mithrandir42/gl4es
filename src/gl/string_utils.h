@@ -1,5 +1,5 @@
-#ifndef __STRING_UTILS_H__
-#define __STRING_UTILS_H__
+#ifndef _GL4ES_STRING_UTILS_H_
+#define _GL4ES_STRING_UTILS_H_
 
 const char* AllSeparators;
 
@@ -17,4 +17,6 @@ char* NextStr(char* pBuffer);   // go to next non "blank"
 char* NextBlank(char* pBuffer);   // go to next "blank"
 char* NextLine(char* pBuffer);   // go to next new line (crlf not included)
 
-#endif //__STRING_UTILS_H__
+const char* GetNextStr(char* pBuffer); // get a (static) copy of next str (until next separator), can be a simple number or separator also
+
+#endif // _GL4ES_STRING_UTILS_H_

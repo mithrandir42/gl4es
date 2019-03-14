@@ -1,7 +1,6 @@
-#include "gl.h"
+#ifndef _GL4ES_FPE_H_
+#define _GL4ES_FPE_H_
 
-#ifndef __FPE_H_
-#define __FPE_H_
 /*
   This is the FPE : Fixed Pipeline Emulator
 
@@ -11,6 +10,9 @@
   For conveniance, the relevant GL states element are condenced in a bitfield packed fpe_state_t structure
 
 */
+
+#include "gles.h"
+#include "program.h"
 
 #define FPE_FOG_EXP    0
 #define FPE_FOG_EXP2   1
@@ -151,13 +153,12 @@ typedef struct {
   program_t *glprogram;
 } fpe_fpe_t;
 
-
 typedef struct {
   void      *cache;
   fpe_fpe_t *fpe;
 } fpe_cache_t;
 
-KHASH_MAP_INIT_INT(fpecachelist, fpe_cache_t *);
+KHASH_MAP_DECLARE_INT(fpecachelist, fpe_cache_t *);
 
 fpe_fpe_t *fpe_GetCache();
 void fpe_disposeCache(fpe_cache_t* cache, int freeprog);
@@ -196,7 +197,7 @@ void builtin_Init(program_t *glprogram);
 int builtin_CheckUniform(program_t *glprogram, char* name, GLint id, int size);
 int builtin_CheckVertexAttrib(program_t *glprogram, char* name, GLint id);
 
-void realize_glenv(int ispoint);
+void realize_glenv(int ispoint, int first, int count, GLenum type, const void* indices, void** scratch);
 void realize_blitenv(int alpha);
 
-#endif
+#endif // _GL4ES_FPE_H_

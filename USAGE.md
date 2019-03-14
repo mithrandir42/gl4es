@@ -13,7 +13,7 @@ Controls the Framebuffer output
 
 ##### LIBGL_ES
 Controls the version of GLES to use
- * 0 : Default, using GLES 1.1 backend (unless built with DEFAULT_ES 2)
+ * 0 : Default, using GLES 2.0 backend (unless built with DEFAULT_ES 1) (not on Pandora, still GLES 1.1 backend by default)
  * 1 : Use GLES 1.1 backend
  * 2 : Use GLES 2.0 backend
 
@@ -106,9 +106,7 @@ PANDORA only: enable Texture Streaming (works only on RGB textures)
  * 2 : Enabled on all RGB textures
 
 ##### LIBGL_COPY
-Control the glCopyTex(Sub)Image2D hack (they are buggy on pandora and don't work most of the time)
- * 0 : Don't use native glCopyTex(Sub)Image2D, but a workaround function using FBO
- * 1 : No glCopyTexImage2D / glCopyTexSubImage2D hack, use native ones
+Removed (Controled the glCopyTex(Sub)Image2D hack, it's now automatic, depending on how compatible is the readed framebuffer)
 
 ##### LIBGL_NOLUMALPHA
 Control the availability of the LUMUNANCE_ALPHA format (can be buggy on Pandora model CC)
@@ -245,8 +243,13 @@ Hack to define default WRAP mode for texture
 
 ##### LIBGL_FBOMAKECURRENT
 Workaround for FBO and glXMakeCurrent (force unbind/bind FBO when changing context)
-* 0 : Disabled (Default on mast configuration)
+* 0 : Disabled (Default on most configuration)
 * 1 : Enabled (Default if Vendor is ARM or if using LIBGL_FB 1 and 2)
+
+##### LIBL_FBOUNBIND
+Workaround on FBO where a binded texture is used for drawing
+* 0 : Disabled (Default for all other configuration)
+* 1 : Enabled (Default on ARM and PowerVR hardware)
 
 ##### LIBGL_FBOFORCETEX
 For the Color Attachment 0 to be a Texture2D (even if program attachs a Renderbuffer) => may speedup glBlitFramebuffer if used
@@ -254,7 +257,7 @@ For the Color Attachment 0 to be a Texture2D (even if program attachs a Renderbu
 * 1 : For Color Attachment 0 of FBO to be a texture
 
 ##### LIBGL_FBO
-PANDORA and CHIP only: define custom dimension for FBO (only used with LIBGL_FBO=2)
+Hack: define custom dimension for FBO (only used with LIBGL_FBO=2)
 * WxH : Define FBO of WxH size (ex: LIBGL_FBO=1280x720)
 
 ##### LIBGL_NOTEXARRAY
@@ -267,10 +270,31 @@ Log to the console Shader Compile error, with initial and ShaderConv'd source of
 * 0 : Default, don't log
 * 1 : Log Shader Compilation Errors
 
+##### LIBGL_SHADERNOGLES
+Don't use GL_ES part in shaders
+* 0 : Default, let GL_ES part in shader
+* 1 : Remove the GL_ES part in shader (usefull for Löve for example)
+
 ##### LIBGL_NODEPTHTEX
 Disable the use of Depth texture
 * 0 : Default, Use Depth Texture if supported by Hardware
 * 1 : Disable the use of Depth Texture (renderbuffer will be used in FBO)
+
+##### LIBGL_FLOAT
+Expose support for FLOAT and HALF_FLOAT Texture support (and has attachement to FBO)
+* 0 : Don't exposed, even if supported in hardware
+* 1 : Default, exposed what is supported by hardware
+* 2 : Force exposed, even if no supported (will be emulated has GL_UNSIGNED_BYTE if not supported)
+
+##### LIBGL_GLXRECYCLE
+Recycle EGLSurface per Drawable, instead of destroying them
+* 0 : Default, don't recycle
+* 1 : Don't destroy EGLSurface, per reused them per drawable (can fix EGL_BAD_ALLOC error). EGLSurface are never destroyed in this mode for now.
+
+##### LIBGL_NOCLEAN
+Debug: don't clean GLContext when they are destroy
+* 0 : Default, clean GLContext 
+* 1 : Don't clean GLContext
 
 ##### LIBGL_EGL
 Define EGL lib to use. Default folder are the standard one for dynamic librarie loading (LD_LIBRARY_PATH and friend) plus "/opt/vc/lib/", /usr/local/lib/" and "/usr/lib/".

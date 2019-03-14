@@ -6,6 +6,7 @@ SET(GL_SRC
     gl/blit.c
     gl/blend.c
     gl/buffers.c
+    gl/build_info.c
     gl/debug.c
     gl/decompress.c
     gl/depth.c
@@ -19,7 +20,7 @@ SET(GL_SRC
     gl/fpe_shader.c
     gl/framebuffers.c
     gl/getter.c
-    gl/gl.c
+    gl/gl4es.c
     gl/glstate.c
     gl/hint.c
     gl/init.c
@@ -42,6 +43,7 @@ SET(GL_SRC
     gl/shader.c
     gl/shaderconv.c
     gl/stack.c
+    gl/stencil.c
     gl/string_utils.c
     gl/stubs.c
     gl/texenv.c
@@ -49,7 +51,7 @@ SET(GL_SRC
     gl/texture.c
     gl/uniform.c
     gl/vertexattrib.c
-	gl/wrap/gl.c
+	gl/wrap/gl4es.c
 	gl/wrap/gles.c
 	gl/wrap/glstub.c
 	gl/math/eval.c
@@ -61,6 +63,7 @@ SET(GL_H
     gl/blend.h
     gl/blit.h
     gl/buffers.h
+	gl/build_info.h
     gl/const.h
     gl/debug.h
     gl/decompress.h
@@ -74,7 +77,7 @@ SET(GL_H
     gl/fpe_shader.h
     gl/framebuffers.h
     gl/gles.h
-    gl/gl.h
+    gl/gl4es.h
     gl/glstate.h
     gl/hint.h
     gl/init.h
@@ -97,6 +100,7 @@ SET(GL_H
     gl/shaderconv.h
     gl/stack.h
     gl/state.h
+    gl/stencil.h
     gl/stb_dxt_104.h
     gl/string_utils.h
     gl/texenv.h
@@ -105,17 +109,20 @@ SET(GL_H
     gl/texture.h
     gl/vertexattrib.h
     gl/math/eval.h
+    gl/wrap/gl4es.h
     gl/wrap/gles.h
-    gl/wrap/gl.h
     gl/wrap/stub.h
 )
+
+set_source_files_properties(gl/build_info.c PROPERTIES OBJECT_OUTPUTS "dummy.c")
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     include_directories(glx)
 #    aux_source_directory(glx GLX_SOURCES)
 #    list(APPEND GL_SOURCES ${GLX_SOURCES})
     list(APPEND GL_SRC
-	    glx/hardext.c
+        glx/hardext.c
+        glx/gbm.c
 	    glx/glx.c
 	    glx/lookup.c
         glx/rpi.c
@@ -123,6 +130,9 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
         glx/utils.c
     )
     list(APPEND GL_H
+        glx/glx_gbm.h
+        glx/gbmfunc.h
+        glx/drmfunc.h
         glx/glx.h
         glx/hardext.h
         glx/rpi.h
@@ -136,10 +146,16 @@ endif()
 if(AMIGAOS4)
     include_directories(agl)
     list(APPEND GL_SRC
+        glx/hardext.c
+        glx/gbm.c
+        glx/glx.c
+        glx/lookup.c
         agl/amigaos.c
         agl/agl.c
     )
     list(APPEND GL_H
+        glx/hardext.h
+        glx/glx.h
         agl/amigaos.h
         agl/agl.h
     )

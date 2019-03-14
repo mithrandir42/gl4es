@@ -1,7 +1,8 @@
-#include "gl.h"
+#ifndef _GL4ES_PIXEL_H_
+#define _GL4ES_PIXEL_H_
 
-#ifndef PIXEL_H
-#define PIXEL_H
+#include <stdbool.h>
+#include "gles.h"
 
 typedef struct {
     GLenum type;
@@ -49,4 +50,4 @@ bool pixel_to_ppm(const GLvoid *pixels,
                   GLuint width, GLuint height,
                   GLenum format, GLenum type, GLuint name, GLuint align);
 
-#endif
+#endif // _GL4ES_PIXEL_H_

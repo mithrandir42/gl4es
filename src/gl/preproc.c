@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include "khash.h"
 
 #include "preproc.h"
 #include "string_utils.h"
@@ -9,6 +10,7 @@
 //#define DEBUG
 #ifdef DEBUG
 #define DBG(a) a
+#pragma GCC optimize 0
 #else
 #define DBG(a)
 #endif
@@ -35,6 +37,10 @@ typedef enum _eTokenType {
     TK_CLOSEBRAKET,
     TK_OPENCOMMENT,
     TK_CLOSECOMMENT,
+    TK_COLUMN,
+    TK_SEMICOLUMN,
+    TK_COMMA,
+    TK_DOT,
     TK_AMP,
     TK_POW,
     TK_PIPE,
@@ -271,6 +277,10 @@ eTokenType NextToken(char **p, uToken *tok) {
         case '>': tok->type=TK_GREATER; break;
         case '+': tok->type=TK_PLUS; break;
         case '-': tok->type=TK_MINUS; break;
+        case ':': tok->type=TK_COLUMN; break;
+        case ';': tok->type=TK_SEMICOLUMN; break;
+        case ',': tok->type=TK_COMMA; break;
+        case '.': tok->type=TK_DOT; break;
         // todo: char and string?
         default:
             // all other are plain Ids...
@@ -296,11 +306,53 @@ eTokenType GetToken(char **p, uToken *tok, int incomment) {
     return ret;
 }
 
-char* preproc(const char* code, int keepcomments) {
+typedef struct {
+    int cap;
+    int sz;
+    int *ifs;
+} stackif_t;
+
+static void push_if(stackif_t *st, int v) {
+    if(st->sz == st->cap) {
+        st->cap += 16;
+        st->ifs = (int*)realloc(st->ifs, sizeof(int)*st->cap);
+    }
+    st->ifs[st->sz++] = v;
+}
+
+static int pop_if(stackif_t *st) {
+    if(st->sz)
+        return st->ifs[--st->sz];
+    return -1;
+}
+
+static int top_if(stackif_t *st) {
+    if(st->sz)
+        return st->ifs[st->sz-1];
+    return -1;
+}
+static void not_top_if(stackif_t *st) {
+    if(st->sz && st->ifs[st->sz-1]!=-1)
+        st->ifs[st->sz-1] = 1 - st->ifs[st->sz-1];
+}
+
+static int result_if(stackif_t *st) {
+    for (int i=0; i<st->sz; ++i) {
+        if(st->ifs[i] == 1) return 1;
+        else if(st->ifs[i] == -1) return -1;
+    }
+    return 0;
+}
+
+KHASH_MAP_INIT_STR(define, int);
+KHASH_MAP_INIT_STR(alldefine, char*);
+
+char* preproc(const char* code, int keepcomments, int gl_es, extensions_t* exts) {
     DBG(printf("Preproc on: =========\n%s\n=================\n", code);)
 
     uToken tok;
     char* p = (char*)code;
+    char* oldp = NULL;
     int cap=1000;
     char* ncode = (char*)malloc(1000);
     ncode[0]=0;
@@ -310,8 +362,34 @@ char* preproc(const char* code, int keepcomments) {
     int incomment=0;
     int newline=0;
     int gettok=0;
+    int notok = 0;
+    char extname[50];
+    khint_t k;
+    int ret;
+    char *defname;   //used for #define or #if
+    int  defval;
+    stackif_t stackif = {0};
+    int nowrite_ifs = 0;
+    int current_if = 0;
+    int need_pop = 0;
+
+    khash_t(alldefine) *alldefines = kh_init(alldefine);  // will conatin all defines, even the one without int inside
+
+    khash_t(define) *defines = kh_init(define);
+    if(gl_es) {
+        k = kh_put(define, defines, "GL_ES", &ret);
+        kh_value(defines, k) = 0;
+    }
+    push_if(&stackif, 0);   // default to OK
     GetToken(&p, &tok, incomment);
     while(tok.type!=TK_NULL) {
+        // pop #if / #endif status
+        if(need_pop) {
+            pop_if(&stackif);
+            nowrite_ifs = result_if(&stackif);
+            need_pop = 0;
+
+        }
         // pre get token switch
         switch(status) {
             case 110:   // line comment done...
@@ -322,7 +400,7 @@ char* preproc(const char* code, int keepcomments) {
                     strcpy(tok.str, "\n");
                 }
                 write = 1;
-                status = 0;
+                status = (status==210)?1:0;
                 incomment=0;
                 newline=0;
             break;
@@ -334,6 +412,7 @@ char* preproc(const char* code, int keepcomments) {
         if(tok.type!=TK_NULL) {
             switch(status) {
                 case 0: // regular...
+                case 1:
                     if(tok.type==TK_DOUBLESLASH) {
                         status = 100; // line comment
                         incomment = 1;
@@ -343,7 +422,13 @@ char* preproc(const char* code, int keepcomments) {
                         status = 200; // multi-line comment
                         incomment = 1;
                         if(!keepcomments) write=0;
-                    }
+                    } else if(tok.type==TK_SHARP && !incomment && status==0) {
+                        oldp = p-1; // lets buffer the line
+                        status = 300;
+                    } else if(tok.type==TK_NEWLINE)
+                        status = 0;
+                    else if(tok.type!=TK_SPACE)
+                        status = 1; // everything else but space set status to 1...
                     break;
 
                 // line comment...
@@ -366,20 +451,263 @@ char* preproc(const char* code, int keepcomments) {
                         status=210;
                     }
                     break;
+                
+                // # (of ifdef or extension)
+                case 300:
+                    if(tok.type!=TK_SPACE)
+                    if(tok.type==TK_TEXT) {
+                        if(!strcmp(tok.str, "ifdef"))
+                            status=310;
+                        else if(!strcmp(tok.str, "ifndef"))
+                            status=320;
+                        else if(!strcmp(tok.str, "if")) {
+                            // #if defined(GL_ES) not supported for now
+                            push_if(&stackif, -1);
+                            if(nowrite_ifs==1) {
+                                status = 398; notok = 1;
+                            } else
+                                status = 399;
+                            nowrite_ifs = result_if(&stackif);
+                        }
+                        else if(!strcmp(tok.str, "else")) {
+                            status = 399;
+                            // ifs handling
+                            {
+                                not_top_if(&stackif);
+                                int v = result_if(&stackif);
+                                if(v!=-1) {
+                                    notok = 1;
+                                    status = 398;
+                                }
+                                nowrite_ifs = v;
+                            }
+                        } else if(!strcmp(tok.str, "endif")) {
+                            status = 399;
+                            {
+                                need_pop = 1;
+                                if(nowrite_ifs!=-1) {
+                                    notok = 1;
+                                    status = 398;
+                                }
+                            }
+                        } else if(!strcmp(tok.str, "extension")) {
+                            status = 410;
+                        } else if(!strcmp(tok.str, "pragma")) {
+                            status = 510;
+                        } else if(!strcmp(tok.str, "define")) {
+                            status = 610;
+                        } else status=399;
+                    } else status = 399;  // meh?
+                    break;
+
+                // ifdef
+                case 310:
+                    if(tok.type==TK_SPACE)
+                        status = 310;
+                    else if(tok.type==TK_TEXT) {
+                        int v;
+                        if(gl_es && (strcmp(tok.str, "GL_ES")==0))
+                            v = 1;
+                        else if(kh_get(alldefine, alldefines, tok.str)!=kh_end(alldefines)) {
+                            v = 0;
+                        } else if (strncmp(tok.str, "GL_", 3)==0)
+                            v = -1;
+                        else 
+                            v = 1;
+                        push_if(&stackif, v);
+                        nowrite_ifs = result_if(&stackif);
+                        if(nowrite_ifs!=-1) {
+                            status = 398; notok = 1;
+                        } else
+                            status = 399;
+                    } else {push_if(&stackif, -1); nowrite_ifs = result_if(&stackif);status = 399;}
+                    break;
+                
+                // ifndef
+                case 320:
+                    if(tok.type==TK_SPACE)
+                        status = 320;
+                    else if(tok.type==TK_TEXT) {
+                        int v;
+                        if(gl_es && strcmp(tok.str, "GL_ES")==0)
+                            v = 0;
+                        else if(kh_get(alldefine, alldefines, tok.str)!=kh_end(alldefines)) {
+                            v = 1;
+                        } else if (strncmp(tok.str, "GL_", 3)==0)
+                            v = -1;
+                        else 
+                            v = 0;
+                        push_if(&stackif, v);
+                        nowrite_ifs = result_if(&stackif);
+                        if(nowrite_ifs!=-1) {
+                            status = 398; notok = 1;
+                        } else
+                            status = 399;
+                    } else {push_if(&stackif, -1); nowrite_ifs = result_if(&stackif); status = 399;}
+                    break;
+
+                // end of #ifdef GL_ES and variant..
+                case 398:
+                    if(tok.type==TK_NEWLINE) {
+                        oldp = NULL;
+                        status = 0;
+                    }
+                    break;
+
+                // fallback for #ifdef GL_ES, write the line back...
+                case 399:
+                    {
+                        int l = p - oldp;
+                        memcpy(tok.str, oldp, l);
+                        tok.str[l]='\0';
+                        oldp = 0;
+                    }
+                    status = (tok.type==TK_NEWLINE)?0:1;
+                    break;
+                // #extension
+                case 410:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_TEXT && strlen(tok.str)<50) {
+                        strcpy(extname, tok.str);
+                        status = 420;
+                    } else {
+                        status = 399; // fallback, syntax error...
+                    }
+                    break;
+                // after the name and before the ':' of #extension
+                case 420:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if (tok.type==TK_COLUMN) {
+                        status=430;
+                    } else {
+                        status = 399; // fallback, syntax error...
+                    }
+                    break;
+                // after the ':' of #extension
+                case 430:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_TEXT) {
+                        int state = -1;
+                        if(!strcmp(tok.str, "disable"))
+                            state = 0;
+                        else if(!strcmp(tok.str, "warn"))
+                            state = 1;
+                        else if(!strcmp(tok.str, "enable"))
+                            state = 1;
+                        else if(!strcmp(tok.str, "require"))
+                            state = 1;
+                        if(state!=-1) {
+                            if(exts->size==exts->cap) {
+                                exts->cap += 4;
+                                exts->ext = (extension_t*)realloc(exts->ext, sizeof(exts)*exts->cap);
+                            }
+                            strcpy(exts->ext[exts->size].name, extname);
+                            exts->ext[exts->size].state = state;
+                            ++exts->size;
+                            status = 398;   // all done
+                        } else
+                            status = 399; // error, unknown keyword
+                    } else {
+                        status = 399; // fallback, syntax error...
+                    }
+                    break;
+                // #pragma
+                case 510:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_TEXT && strlen(tok.str)<50) {
+                        if(strcmp(tok.str, "message")==0)
+                            status = 398; //pragma message are removed
+                        else if(strcmp(tok.str, "parameter")==0)
+                            status = 398; //pragma message are removed
+                        else
+                            status = 399;   // other pragma as left as-is
+                    } else {
+                        status = 399; // fallback, syntax error...
+                    }
+                    break;
+                // #define
+                case 610:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_TEXT && strlen(tok.str)<50) {
+                        defname = strdup(tok.str);
+                        k = kh_put(alldefine, alldefines, defname, &ret);
+                        kh_value(alldefines, k) = defname;
+                        status = 620; // and now get the value
+                    } else {
+                        status = 399; // fallback, define name too long...
+                    }
+                    break;
+                case 620:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_INT) {
+                        defval = tok.integer;
+                        status = 630; // check if end of line (so it's a simple define)
+                    } else if(tok.type==TK_NEWLINE) {
+                        {
+                            int l = p - oldp;
+                            memcpy(tok.str, oldp, l);
+                            tok.str[l]='\0';
+                            oldp = 0;
+                        }
+                        status = 0;
+                    } else {
+                        status = 399; // fallback
+                    }
+                    break;
+                case 630:
+                    if(tok.type==TK_SPACE) {
+                        // nothing...
+                    } else if(tok.type==TK_NEWLINE) {
+                        k = kh_put(define, defines, defname, &ret);
+                        kh_value(defines, k) = defval;
+                        {
+                            int l = p - oldp;
+                            memcpy(tok.str, oldp, l);
+                            tok.str[l]='\0';
+                            oldp = 0;
+                        }
+                        status = 0; // ok, define added to collection, left the line as-is anyway
+                    } else {
+                        status = 399; // fallback
+                    }
+                    break;
             }
-            if(write) {
-                int l = strlen(tok.str);
-                if(sz+l>=cap) {
-                    cap+=2000;
-                    ncode = (char*)realloc(ncode, cap);
+            if(notok)
+                notok=0;
+            else
+                if(write && !oldp && nowrite_ifs!=1) {
+                    if(!incomment && tok.type == TK_TEXT) {
+                        k = kh_get(define, defines, tok.str);
+                        if(k!=kh_end(defines)) {
+                            int v = kh_val(defines, k);
+                            sprintf(tok.str, "%d", v); // overide define with defined value
+                        }
+                    }
+                    int l = strlen(tok.str);
+                    if(sz+l>=cap) {
+                        cap+=2000;
+                        ncode = (char*)realloc(ncode, cap);
+                    }
+                    strcat(ncode, tok.str);
+                    sz+=l;
                 }
-                strcat(ncode, tok.str);
-                sz+=l;
-            }
         }
     }
 
     DBG(printf("New code is: ------------\n%s\n------------------\n", ncode);)
+    kh_destroy(define, defines);
+    kh_foreach_value(alldefines, defname,
+            free(defname);
+        )
+    kh_destroy(alldefine, alldefines);
+    if(stackif.ifs)
+        free(stackif.ifs);
 
     return ncode;
 }

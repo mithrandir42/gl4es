@@ -1,9 +1,13 @@
 /* Blit utility function */
-
-#include "gl.h"
 #include "blit.h"
-#include "../glx/hardext.h"
+
+#include <math.h>
+
+#include "fpe.h"
+#include "gl4es.h"
+#include "glstate.h"
 #include "init.h"
+#include "loader.h"
 #ifdef TEXSTREAM
 # ifndef GL_TEXTURE_STREAM_IMG
 # define GL_TEXTURE_STREAM_IMG                                   0x8C0D
@@ -18,12 +22,12 @@ void pushViewport(GLint x, GLint y, GLsizei width, GLsizei height);
 void popViewport();
 
 void gl4es_blitTexture_gles1(GLuint texture,
-    float sx, float sy,
-    float width, float height, 
-    float nwidth, float nheight, 
-    float zoomx, float zoomy, 
-    float vpwidth, float vpheight, 
-    float x, float y, int mode) {
+    GLfloat sx, GLfloat sy,
+    GLfloat width, GLfloat height, 
+    GLfloat nwidth, GLfloat nheight, 
+    GLfloat zoomx, GLfloat zoomy, 
+    GLfloat vpwidth, GLfloat vpheight, 
+    GLfloat x, GLfloat y, GLint mode) {
 
     LOAD_GLES(glClientActiveTexture);
 
@@ -58,8 +62,8 @@ void gl4es_blitTexture_gles1(GLuint texture,
         int sourceRect[4] = {sx, sy, width, height};
         gles_glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, sourceRect);
         // take x/y of ViewPort into account
-        float dx = (customvp)?0.0f:glstate->raster.viewport.x;
-        float dy = (customvp)?0.0f:glstate->raster.viewport.y;
+        GLfloat dx = (customvp)?0.0f:glstate->raster.viewport.x;
+        GLfloat dy = (customvp)?0.0f:glstate->raster.viewport.y;
         //TODO: do something with width / height of ViewPort?
         // then draw it
         gles_glDrawTexf(x+dx, y+dy, 0.0f, width, height);
@@ -70,12 +74,12 @@ void gl4es_blitTexture_gles1(GLuint texture,
         LOAD_GLES(glTexCoordPointer);
         LOAD_GLES(glDrawArrays);
 
-        float w2 = 2.0f / (customvp?vpwidth:glstate->raster.viewport.width);
-        float h2 = 2.0f / (customvp?vpheight:glstate->raster.viewport.height);
-        float blit_x1=roundf(x);
-        float blit_x2=roundf(x+width*zoomx);
-        float blit_y1=roundf(y);
-        float blit_y2=roundf(y+height*zoomy);
+        GLfloat w2 = 2.0f / (customvp?vpwidth:glstate->raster.viewport.width);
+        GLfloat h2 = 2.0f / (customvp?vpheight:glstate->raster.viewport.height);
+        GLfloat blit_x1=roundf(x);
+        GLfloat blit_x2=roundf(x+width*zoomx);
+        GLfloat blit_y1=roundf(y);
+        GLfloat blit_y2=roundf(y+height*zoomy);
         GLfloat blit_vert[] = {
             blit_x1*w2-1.0f, blit_y1*h2-1.0f,
             blit_x2*w2-1.0f, blit_y1*h2-1.0f,
@@ -187,12 +191,12 @@ const char _blit_fsh_alpha[] = "#version 100            \n" \
 "}                                                      \n";
 
 void gl4es_blitTexture_gles2(GLuint texture,
-    float sx, float sy,
-    float width, float height, 
-    float nwidth, float nheight, 
-    float zoomx, float zoomy, 
-    float vpwidth, float vpheight, 
-    float x, float y, int mode) {
+    GLfloat sx, GLfloat sy,
+    GLfloat width, GLfloat height, 
+    GLfloat nwidth, GLfloat nheight, 
+    GLfloat zoomx, GLfloat zoomy, 
+    GLfloat vpwidth, GLfloat vpheight, 
+    GLfloat x, GLfloat y, GLint mode) {
 
     LOAD_GLES(glDrawArrays);
 
@@ -311,12 +315,12 @@ void gl4es_blitTexture_gles2(GLuint texture,
     }
 
     int customvp = (vpwidth>0.0);
-    float w2 = 2.0f / (customvp?vpwidth:glstate->raster.viewport.width);
-    float h2 = 2.0f / (customvp?vpheight:glstate->raster.viewport.height);
-    float blit_x1=roundf(x);
-    float blit_x2=roundf(x+width*zoomx);
-    float blit_y1=roundf(y);
-    float blit_y2=roundf(y+height*zoomy);
+    GLfloat w2 = 2.0f / (customvp?vpwidth:glstate->raster.viewport.width);
+    GLfloat h2 = 2.0f / (customvp?vpheight:glstate->raster.viewport.height);
+    GLfloat blit_x1=roundf(x);
+    GLfloat blit_x2=roundf(x+width*zoomx);
+    GLfloat blit_y1=roundf(y);
+    GLfloat blit_y2=roundf(y+height*zoomy);
     GLfloat *vert = glstate->blit->vert;
     GLfloat *tex = glstate->blit->tex;
     vert[0] = blit_x1*w2-1.0f;  vert[1] = blit_y1*h2-1.0f;
@@ -351,19 +355,20 @@ void gl4es_blitTexture_gles2(GLuint texture,
 }
 
 void gl4es_blitTexture(GLuint texture, 
-    float sx, float sy, 
-    float width, float height, 
-    float nwidth, float nheight, 
-    float zoomx, float zoomy, 
-    float vpwidth, float vpheight, 
-    float x, float y, int mode) {
+    GLfloat sx, GLfloat sy, 
+    GLfloat width, GLfloat height, 
+    GLfloat nwidth, GLfloat nheight, 
+    GLfloat zoomx, GLfloat zoomy, 
+    GLfloat vpwidth, GLfloat vpheight, 
+    GLfloat x, GLfloat y, GLint mode) {
 //printf("blitTexture(%d, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %d) customvp=%d, vp=%d/%d/%d/%d\n", texture, sx, sy, width, height, nwidth, nheight, zoomx, zoomy, vpwidth, vpheight, x, y, mode, (vpwidth>0.0), glstate->raster.viewport.x, glstate->raster.viewport.y, glstate->raster.viewport.width, glstate->raster.viewport.height);
     LOAD_GLES(glBindTexture);
     LOAD_GLES(glActiveTexture);
-#ifdef TEXSTREAM
     LOAD_GLES(glEnable);
     LOAD_GLES(glDisable);
-#endif
+
+    realize_textures();
+
     gl4es_glPushAttrib(GL_TEXTURE_BIT | GL_ENABLE_BIT | GL_TRANSFORM_BIT | GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT);
 
     if(glstate->gleshard->active) {
@@ -375,25 +380,36 @@ void gl4es_blitTexture(GLuint texture,
 
     gl4es_glDisable(GL_DEPTH_TEST);
     gl4es_glDisable(GL_CULL_FACE);
+    gl4es_glDisable(GL_STENCIL_TEST);
 
     if(depthwrite)
         gl4es_glDepthMask(GL_FALSE);
 
 #ifdef TEXSTREAM
-    if(glstate->bound_stream[0]) {
+    if(glstate->bound_stream[0] && hardext.esversion==1) {
 //printf("TMU%d, turning off Streaming (blit)\n", 0);
         gles_glDisable(GL_TEXTURE_STREAM_IMG);
         DeactivateStreaming();
     }
 #endif
-    gl4es_glEnable(GL_TEXTURE_2D);
+    int tmp = glstate->enable.texture[0];
+
     if(glstate->actual_tex2d[0] != texture);
         gles_glBindTexture(GL_TEXTURE_2D, texture);
 
     if(hardext.esversion==1) {
+        if(!IS_TEX2D(tmp))
+            gles_glEnable(GL_TEXTURE_2D);
+        if(IS_CUBE_MAP(tmp))
+            gles_glDisable(GL_TEXTURE_CUBE_MAP);
+
         gl4es_blitTexture_gles1(texture, sx, sy, width, height, 
                                 nwidth, nheight, zoomx, zoomy, 
                                 vpwidth, vpheight, x, y, mode);
+        if(!IS_TEX2D(tmp))
+            gles_glDisable(GL_TEXTURE_2D);
+        if(IS_CUBE_MAP(tmp))
+            gles_glEnable(GL_TEXTURE_CUBE_MAP);
     } else {
         gl4es_blitTexture_gles2(texture, sx, sy, width, height, 
             nwidth, nheight, zoomx, zoomy, 
@@ -402,7 +418,7 @@ void gl4es_blitTexture(GLuint texture,
 
     // All the previous states are Pushed / Poped anyway...
 #ifdef TEXSTREAM
-    if(glstate->bound_stream[0]) {
+    if(glstate->bound_stream[0] && hardext.esversion==1) {
 //printf("TMU%d, turning ON  Streaming (blit)\n", 0);
         gltexture_t *tex = glstate->texture.bound[0][ENABLED_TEX2D];
         ActivateStreaming(tex->streamingID);

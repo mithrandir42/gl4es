@@ -1,11 +1,12 @@
-#include <string.h>
 #include "shaderconv.h"
-#include "string_utils.h"
+
+#include <stdio.h>
 #include "../glx/hardext.h"
 #include "debug.h"
 #include "fpe_shader.h"
-#include "preproc.h"
 #include "init.h"
+#include "preproc.h"
+#include "string_utils.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -233,13 +234,19 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
   char* pBuffer = (char*)pEntry;
 
   if(!fpeShader) {
+    extensions_t exts;  // dummy...
+    exts.cap = exts.size = 0;
+    exts.ext = NULL;
     // preproc first
-    pBuffer = preproc(pBuffer, comments);
+    pBuffer = preproc(pBuffer, comments, globals4es.shadernogles, &exts);
     // now comment all line starting with precision...
     if(strstr(pBuffer, "\nprecision")) {
       int sz = strlen(pBuffer);
       pBuffer = InplaceReplace(pBuffer, &sz, "\nprecision", "\n//precision");
     }
+    // should do something with the extension list...
+    if(exts.ext)
+      free(exts.ext);
   }
 
   static shaderconv_need_t dummy_need;
@@ -414,7 +421,7 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
     }
   }*/
   // checking "#extension" keyword, and clean up some...
-  {
+  /*{
     char* p = strstr(Tmp, "#extension");  // should test this is #first character in the line
     while(p) {
       char *p2 = NextStr(StrNext(Tmp, "#extension"));
@@ -432,7 +439,7 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
       // all done
       p = strstr(p+1, "#extension");
     }
-  }
+  }*/ // done in preproc now
   if(isVertex) {
       // check for builtin OpenGL attributes...
       int n = sizeof(builtin_attrib)/sizeof(builtin_attrib_t);
@@ -448,6 +455,21 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
               InplaceInsert(GetLine(Tmp, headline++), def);
           }
       }
+  }
+  // cleaning up the "centroid" keyword...
+  if(strstr(Tmp, "centroid"))
+  {
+    char *p = Tmp;
+    while((p=strstr(p, "centroid"))!=NULL)
+    {
+      if(p[8]==' ' || p[8]=='\t') { // what next...
+        const char* p2 = GetNextStr(p+8);
+        if(strcmp(p2, "uniform")==0 || strcmp(p2, "varying")==0) {
+          memset(p, ' ', 8);  // erase the keyword...
+        }
+      } 
+      p+=8;
+    }
   }
   
   // check for builtin OpenGL gl_LightSource & friends
@@ -734,13 +756,12 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
 }
 
 int isBuiltinAttrib(const char* name) {
-    int ret = -1;
     int n = sizeof(builtin_attrib)/sizeof(builtin_attrib_t);
-    for (int i=0; i<n && ret==-1; i++) {
+    for (int i=0; i<n; i++) {
         if (strcmp(builtin_attrib[i].name, name)==0)
-            ret=builtin_attrib[i].attrib;
+            return builtin_attrib[i].attrib;
     }
-    return ret;
+    return -1;
 }
 
 int isBuiltinMatrix(const char* name) {

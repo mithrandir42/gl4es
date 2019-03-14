@@ -1,9 +1,10 @@
-#include "gl.h"
-#include "state.h"
-#include <gl4eshint.h>
+#ifndef _GL4ES_STACK_H_
+#define _GL4ES_STACK_H_
 
-#ifndef GL_STACK_H
-#define GL_STACK_H
+#include "gles.h"
+#include "state.h"
+#include "texture.h"
+#include <gl4eshint.h>
 
 #define STACK_SIZE 16
 
@@ -180,4 +181,4 @@ void gl4es_glPopClientAttrib();
 void gl4es_glPushAttrib(GLbitfield mask);
 void gl4es_glPopAttrib();
 
-#endif
+#endif // _GL4ES_STACK_H_

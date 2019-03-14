@@ -1,10 +1,13 @@
-#include "gl.h"
-#include "init.h"
-#include "texgen.h"
+#include <gl4eshint.h>
 #include "../glx/hardext.h"
-#include "gl4eshint.h"
-#include "light.h"
 #include "debug.h"
+#include "gl4es.h"
+#include "glstate.h"
+#include "init.h"
+#include "loader.h"
+#include "light.h"
+#include "matvec.h"
+#include "texgen.h"
 
 GLenum gl4es_glGetError() {
 	LOAD_GLES(glGetError);
@@ -76,7 +79,6 @@ void BuildExtensionsList() {
                 "GL_EXT_secondary_color "
                 "GL_ARB_multitexture "
                 "GL_ARB_texture_border_clamp "
-                "GL_ARB_point_parameters "
                 "GL_ARB_texture_env_add "
                 "GL_EXT_texture_env_add "
                 "GL_ARB_texture_env_combine "
@@ -86,7 +88,6 @@ void BuildExtensionsList() {
                 "GL_ARB_texture_env_dot3 "
                 "GL_EXT_texture_env_dot3 "
                 "GL_SGIS_generate_mipmap "
-                "GL_EXT_packed_depth_stencil "
                 "GL_EXT_draw_range_elements "
                 "GL_EXT_bgra "
                 "GL_ARB_texture_compression "
@@ -144,6 +145,25 @@ void BuildExtensionsList() {
             strcat(extensions, "GL_ARB_texture_cube_map ");
             strcat(extensions, "GL_EXT_texture_cube_map ");
         }
+        if(hardext.rgtex) {
+            strcat(extensions, "GL_EXT_texture_rg ");
+        }
+        if(hardext.floattex || (globals4es.floattex==2)) {
+            strcat(extensions, "GL_EXT_texture_float ");
+        }
+        if(hardext.halffloattex || (globals4es.floattex==2)) {
+            strcat(extensions, "GL_EXT_texture_half_float ");
+        }
+        if(hardext.floatfbo || (globals4es.floattex==2)) {
+            strcat(extensions, "GL_EXT_color_buffer_float ");
+        }
+        if(hardext.halffloatfbo || (globals4es.floattex==2)) {
+            strcat(extensions, "GL_EXT_color_buffer_half_float ");
+        }
+        if(hardext.depthtex) {
+            strcat(extensions, "GL_EXT_depth_texture ");
+            strcat(extensions, "GL_ARB_depth_texture ");
+        }
         if(hardext.esversion>1) {
             strcat(extensions, "GL_EXT_fog_coord ");
             strcat(extensions, "GL_EXT_separate_specular_color ");
@@ -161,20 +181,27 @@ void BuildExtensionsList() {
                 "GL_ARB_instanced_arrays "
                 );
         }
+        if(globals4es.arb_program) {
+            strcat(extensions,
+            "GL_ARB_vertex_program "
+            "GL_ARB_fragment_program "
+            );
+        }
         char* p = extensions;
         num_extensions = 0;
         // quickly count extensions. Each one is separated by space...
-        while ((p=strchr(p, ' '))) { p++; num_extensions++; }
+        while ((p=strchr(p, ' '))) { while(*(p)==' ') ++p; num_extensions++; }
         // and now split in array of individual extensions
         // TODO: is all this better be moved in glstate?
-        extensions_list = (GLubyte**)malloc(num_extensions * sizeof(GLubyte*));
+        extensions_list = (GLubyte**)calloc(num_extensions, sizeof(GLubyte*));
         p = extensions;
         for (int i=0; i<num_extensions; i++) {
             char* p2 = strchr(p, ' ');
             int sz = p2 - p;
-            extensions_list[i] = (GLubyte*)malloc((sz+1)*sizeof(GLubyte));
+            extensions_list[i] = (GLubyte*)calloc(sz+1, sizeof(GLubyte));
             strncpy(extensions_list[i], p, sz);
-            p = ++p2;
+            while(*p2==' ') ++p2;
+            p = p2;
         }
     }
 }
@@ -234,6 +261,9 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
             *params = 1;
             break;
         case GL_MAX_TEXTURE_UNITS:
+            *params = hardext.maxtex;
+            break;
+        case GL_MAX_TEXTURE_COORDS:
             *params = hardext.maxtex;
             break;
         case GL_PACK_ALIGNMENT:
@@ -425,6 +455,51 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
         case GL_CURRENT_FOG_COORD:
             *params=glstate->fogcoord;
             break;
+        case GL_STENCIL_FUNC:
+            *params=glstate->stencil.func[0];
+            break;
+        case GL_STENCIL_VALUE_MASK:
+            *params=glstate->stencil.f_mask[0];
+            break;
+        case GL_STENCIL_REF:
+            *params=glstate->stencil.f_ref[0];
+            break;
+        case GL_STENCIL_BACK_FUNC:
+            *params=glstate->stencil.func[1];
+            break;
+        case GL_STENCIL_BACK_VALUE_MASK:
+            *params=glstate->stencil.f_mask[1];
+            break;
+        case GL_STENCIL_BACK_REF:
+            *params=glstate->stencil.f_ref[1];
+            break;
+        case GL_STENCIL_WRITEMASK:
+            *params=glstate->stencil.mask[0];
+            break;
+        case GL_STENCIL_BACK_WRITEMASK:
+            *params=glstate->stencil.mask[1];
+            break;
+        case GL_STENCIL_FAIL:
+            *params=glstate->stencil.sfail[0];
+            break;
+        case GL_STENCIL_PASS_DEPTH_FAIL:
+            *params=glstate->stencil.dpfail[0];
+            break;
+        case GL_STENCIL_PASS_DEPTH_PASS:
+            *params=glstate->stencil.dppass[0];
+            break;
+        case GL_STENCIL_BACK_FAIL:
+            *params=glstate->stencil.sfail[1];
+            break;
+        case GL_STENCIL_BACK_PASS_DEPTH_FAIL:
+            *params=glstate->stencil.dpfail[1];
+            break;
+        case GL_STENCIL_BACK_PASS_DEPTH_PASS:
+            *params=glstate->stencil.dppass[1];
+            break;
+        case GL_STENCIL_CLEAR_VALUE:
+            *params=glstate->stencil.clear;
+            break;
         case GL_MAX_TEXTURE_SIZE:
             *params=hardext.maxsize;
             switch(globals4es.texshrink) {
@@ -538,6 +613,9 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
         case GL_DRAW_BUFFER:
             *params=GL_FRONT;
             break;
+        case GL_FRAMEBUFFER_BINDING:
+            *params=glstate->fbo.current_fb->id;
+            break;
         // shader stuff
         case GL_CURRENT_PROGRAM:
             *params=glstate->glsl->program;
@@ -559,6 +637,9 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
             if(hardext.esversion==1) return 0; // fall back to actual glGet
             *params=GL_DONT_CARE;
             break;
+        case GL_TEXTURE_COMPRESSION_HINT:
+            *params=GL_DONT_CARE;
+            break;
         // GL4ES special hints
         case GL_SHRINK_HINT_GL4ES:
             *params=globals4es.texshrink;
@@ -576,7 +657,7 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
             *params=globals4es.texdump;
             break;
         case GL_COPY_HINT_GL4ES:
-            *params=globals4es.copytex;
+            *params=0;  // removed
             break;
         case GL_NOLUMAPHA_HINT_GL4ES:
             *params=globals4es.nolumalpha;

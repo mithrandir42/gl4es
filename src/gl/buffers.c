@@ -1,6 +1,12 @@
 #include "buffers.h"
-#include "debug.h"
+
+#include "khash.h"
 #include "../glx/hardext.h"
+#include "attributes.h"
+#include "debug.h"
+#include "gl4es.h"
+#include "glstate.h"
+#include "logs.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -8,6 +14,10 @@
 #else
 #define DBG(a)
 #endif
+
+
+KHASH_MAP_IMPL_INT(buff, glbuffer_t *);
+KHASH_MAP_IMPL_INT(glvao, glvao_t*);
 
 static GLuint lastbuffer = 1;
 
@@ -28,7 +38,7 @@ glbuffer_t** BUFF(GLenum target) {
         return &glstate->vao->unpack;
         break;
      default:
-       printf("LIBGL: Warning, unknown buffer target 0x%04X\n", target);
+       LOGD("LIBGL: Warning, unknown buffer target 0x%04X\n", target);
  }
  return (glbuffer_t**)NULL;
 }
@@ -121,7 +131,7 @@ DBG(printf("glBufferData(%s, %i, %p, %s)\n", PrintEnum(target), size, data, Prin
     glbuffer_t *buff = getbuffer_buffer(target);
     if (buff==NULL) {
 		errorShim(GL_INVALID_OPERATION);
-        printf("LIBGL: Warning, null buffer for target=0x%04X for glBufferData\n", target);
+        LOGE("LIBGL: Warning, null buffer for target=0x%04X for glBufferData\n", target);
         return;
     }
     if (buff->data) {
@@ -337,6 +347,35 @@ DBG(printf("glGetBufferPointerv(%s, %s, %p)\n", PrintEnum(target), PrintEnum(pna
 	}
 }
 
+void* gl4es_glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access)
+{
+DBG(printf("glMapBuffer(%s, %s)\n", PrintEnum(target), PrintEnum(access));)
+	if (!buffer_target(target)) {
+		errorShim(GL_INVALID_ENUM);
+		return (void*)NULL;
+	}
+
+    if(target==GL_ARRAY_BUFFER)
+        VaoSharedClear(glstate->vao);
+
+	glbuffer_t *buff = getbuffer_buffer(target);
+	if (buff==NULL)
+		return (void*)NULL;		// Should generate an error!
+	buff->access = access;	// not used
+	buff->mapped = 1;
+	noerrorShim();
+    uintptr_t ret = (uintptr_t)buff->data;
+    ret += offset;
+	return (void*)ret;		// Not nice, should do some copy or something probably
+}
+void gl4es_glFlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr length)
+{
+    // ignored for now. A proprer handling is probably necessary
+    // but that would mean also proprer handling of MapBuffer in the first place
+    // with shadow copy for example when in read mode only
+}
+
+
 //Direct wrapper
 void glGenBuffers(GLsizei n, GLuint * buffers) AliasExport("gl4es_glGenBuffers");
 void glBindBuffer(GLenum target, GLuint buffer) AliasExport("gl4es_glBindBuffer");
@@ -349,6 +388,9 @@ void *glMapBuffer(GLenum target, GLenum access) AliasExport("gl4es_glMapBuffer")
 GLboolean glUnmapBuffer(GLenum target) AliasExport("gl4es_glUnmapBuffer");
 void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, GLvoid * data) AliasExport("gl4es_glGetBufferSubData");
 void glGetBufferPointerv(GLenum target, GLenum pname, GLvoid ** params) AliasExport("gl4es_glGetBufferPointerv");
+
+void *glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access) AliasExport("gl4es_glMapBufferRange");
+void glFlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr length) AliasExport("gl4es_glFlushMappedBufferRange");
 
 //ARB wrapper
 void glGenBuffersARB(GLsizei n, GLuint * buffers) AliasExport("gl4es_glGenBuffers");
@@ -430,7 +472,7 @@ DBG(printf("glDeleteVertexArrays(%i, %p)\n", n, arrays);)
                     glvao = kh_value(list, k);
                     VaoSharedClear(glvao);
                     kh_del(glvao, list, k);
-                    free(glvao);
+                    //free(glvao);  //let the use delete those
                 }
             }
         }

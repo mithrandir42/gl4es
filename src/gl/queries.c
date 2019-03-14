@@ -1,5 +1,12 @@
 #include "queries.h"
 
+#include "khash.h"
+#include "gl4es.h"
+#include "glstate.h"
+#include "loader.h"
+
+KHASH_MAP_IMPL_INT(queries, glquery_t *);
+
 static GLuint lastquery = 0;
 static glquery_t *active_samples_passed = 0;
 
@@ -134,8 +141,8 @@ void gl4es_glGetQueryObjectiv(GLuint id, GLenum pname, GLint* params) {
 	if (! list) {
 		list = glstate->queries = kh_init(queries);
 		// segfaults if we don't do a single put
-		kh_put(queries, list, 1, &ret);
-		kh_del(queries, list, 1);
+		k = kh_put(queries, list, 1, &ret);
+		kh_del(queries, list, k);
 	}
     k = kh_get(queries, list, id);
     if (k != kh_end(list)) {
@@ -148,7 +155,7 @@ void gl4es_glGetQueryObjectiv(GLuint id, GLenum pname, GLint* params) {
     noerrorShim();
     switch (pname) {
     	case GL_QUERY_RESULT_AVAILABLE:
-    		*params = GL_TRUE;
+    		*params = GL_FALSE;
     		break;
     	case GL_QUERY_RESULT:
     		*params = query->num;
@@ -184,7 +191,7 @@ void gl4es_glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) {
     noerrorShim();
     switch (pname) {
     	case GL_QUERY_RESULT_AVAILABLE:
-    		*params = GL_TRUE;
+    		*params = GL_FALSE;
     		break;
     	case GL_QUERY_RESULT:
     		*params = query->num;
@@ -205,3 +212,13 @@ void glEndQuery(GLenum target) AliasExport("gl4es_glEndQuery");
 void glGetQueryiv(GLenum target, GLenum pname, GLint* params) AliasExport("gl4es_glGetQueryiv");
 void glGetQueryObjectiv(GLuint id, GLenum pname, GLint* params) AliasExport("gl4es_glGetQueryObjectiv");
 void glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint* params) AliasExport("gl4es_glGetQueryObjectuiv");
+
+// ARB wrapper
+void glGenQueriesARB(GLsizei n, GLuint * ids) AliasExport("gl4es_glGenQueries");
+GLboolean glIsQueryARB(GLuint id) AliasExport("gl4es_glIsQuery");
+void glDeleteQueriesARB(GLsizei n, const GLuint* ids) AliasExport("gl4es_glDeleteQueries");
+void glBeginQueryARB(GLenum target, GLuint id) AliasExport("gl4es_glBeginQuery");
+void glEndQueryARB(GLenum target) AliasExport("gl4es_glEndQuery");
+void glGetQueryivARB(GLenum target, GLenum pname, GLint* params) AliasExport("gl4es_glGetQueryiv");
+void glGetQueryObjectivARB(GLuint id, GLenum pname, GLint* params) AliasExport("gl4es_glGetQueryObjectiv");
+void glGetQueryObjectuivARB(GLuint id, GLenum pname, GLuint* params) AliasExport("gl4es_glGetQueryObjectuiv");

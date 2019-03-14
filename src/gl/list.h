@@ -1,7 +1,12 @@
-#include "gl.h"
+#ifndef _GL4ES_LIST_H_
+#define _GL4ES_LIST_H_
 
-#ifndef DISPLAY_LIST_H
-#define DISPLAY_LIST_H
+#include <stdbool.h>
+#include "khash.h"
+#include "../config.h"
+#include "wrap/gles.h"
+#include "attributes.h"
+#include "gles.h"
 
 typedef enum {
 	STAGE_NONE = 0,
@@ -99,10 +104,10 @@ typedef struct {
     int     *shared;
 } rasterlist_t;
 
-KHASH_MAP_INIT_INT(material, rendermaterial_t *)
-KHASH_MAP_INIT_INT(light, renderlight_t *)
-KHASH_MAP_INIT_INT(texgen, rendertexgen_t *)
-KHASH_MAP_INIT_INT(texenv, rendertexenv_t *)
+KHASH_MAP_DECLARE_INT(material, rendermaterial_t *);
+KHASH_MAP_DECLARE_INT(light, renderlight_t *);
+KHASH_MAP_DECLARE_INT(texgen, rendertexgen_t *);
+KHASH_MAP_DECLARE_INT(texenv, rendertexenv_t *);
 
 typedef struct _call_list_t {
     unsigned long len;
@@ -230,7 +235,7 @@ typedef struct _renderlist_t {
     GLboolean open;
 } renderlist_t;
 
-KHASH_MAP_INIT_INT(gllisthead, renderlist_t*)
+KHASH_MAP_DECLARE_INT(gllisthead, renderlist_t*);
 
 #define DEFAULT_CALL_LIST_CAPACITY 20
 #define DEFAULT_RENDER_LIST_CAPACITY 64
@@ -291,4 +296,4 @@ void rlPointParamOp(renderlist_t *list, int op, const GLfloat* v);
 void rlFogCoordf(renderlist_t *list, GLfloat coord);
 void rlEnd(renderlist_t *list);
 
-#endif
+#endif // _GL4ES_LIST_H_

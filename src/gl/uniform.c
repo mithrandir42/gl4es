@@ -1,7 +1,10 @@
 #include "uniform.h"
-#include "program.h"
-#include "matvec.h"
+
 #include "../glx/hardext.h"
+#include "gl4es.h"
+#include "glstate.h"
+#include "loader.h"
+#include "matvec.h"
 
 //#define DEBUG
 #ifdef DEBUG
@@ -554,6 +557,46 @@ void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLb
         //printf("No GLES2 function\n");
         errorShim(GL_INVALID_OPERATION);    // no GLSL hardware
     }
+}
+
+int GetUniformi(program_t *glprogram, GLint location)
+{
+    if(location==-1) {
+        noerrorShim();
+        return 0;
+    }
+
+    khint_t k;
+    uniform_t *m;
+    k = kh_get(uniformlist, glprogram->uniform, location);
+    if (k==kh_end(glprogram->uniform)) {
+        return 0;
+    }
+    m = kh_value(glprogram->uniform, k);
+
+    // ok, grab the value in the cache
+    GLint ret;
+    memcpy(&ret, glprogram->cache.cache + m->cache_offs, sizeof(GLint));
+    return ret;
+}
+
+const char* GetUniformName(program_t *glprogram, GLint location)
+{
+    if(location==-1) {
+        noerrorShim();
+        return 0;
+    }
+
+    khint_t k;
+    uniform_t *m;
+    k = kh_get(uniformlist, glprogram->uniform, location);
+    if (k==kh_end(glprogram->uniform)) {
+        return 0;
+    }
+    m = kh_value(glprogram->uniform, k);
+
+    // ok, grab the value in the cache
+    return m->name;
 }
 
 void glGetUniformfv(GLuint program, GLint location, GLfloat *params) AliasExport("gl4es_glGetUniformfv");

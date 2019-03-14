@@ -1,10 +1,21 @@
-#include "gl.h"
-#include "debug.h"
+#include "gl4es.h"
+
+#if defined(AMIGAOS4) || (defined(NOX11) && defined(NOEGL))
+#include <sys/time.h>
+#endif // defined(AMIGAOS4) || (defined(NOX11) && defined(NOEGL))
+
+#include "../config.h"
 #include "../glx/hardext.h"
-#include "init.h"
-#include "matrix.h"
+#include "wrap/gl4es.h"
+#include "array.h"
+#include "debug.h"
+#include "enum_info.h"
 #include "fpe.h"
+#include "framebuffers.h"
 #include "glstate.h"
+#include "init.h"
+#include "loader.h"
+#include "matrix.h"
 
 int adjust_vertices(GLenum mode, int nb) {
     switch (mode) {
@@ -91,6 +102,9 @@ void glNormalPointer(GLenum type, GLsizei stride, const GLvoid *pointer) AliasEx
 void glTexCoordPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *pointer) AliasExport("gl4es_glTexCoordPointer");
 void glSecondaryColorPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *pointer) AliasExport("gl4es_glSecondaryColorPointer");
 void glFogCoordPointer(GLenum type, GLsizei stride, const GLvoid *pointer) AliasExport("gl4es_glFogCoordPointer");
+void glSecondaryColorPointerEXT(GLint size, GLenum type, GLsizei stride, const GLvoid *pointer) AliasExport("gl4es_glSecondaryColorPointer");
+void glFogCoordPointerEXT(GLenum type, GLsizei stride, const GLvoid *pointer) AliasExport("gl4es_glFogCoordPointer");
+
 
 void gl4es_glInterleavedArrays(GLenum format, GLsizei stride, const GLvoid *pointer) {
     uintptr_t ptr = (uintptr_t)pointer;
@@ -833,51 +847,6 @@ void gl4es_glPolygonMode(GLenum face, GLenum mode) {
 void glPolygonMode(GLenum face, GLenum mode) AliasExport("gl4es_glPolygonMode");
 
 
-void gl4es_glStencilMaskSeparate(GLenum face, GLuint mask) {
-    LOAD_GLES2(glStencilMaskSeparate);
-    errorGL();
-    if(gles_glStencilMaskSeparate) {
-        gles_glStencilMaskSeparate(face, mask);
-    } else {
-        // fake function..., call it only for front or front_and_back, just ignore back (crappy, I know)
-        if ((face==GL_FRONT) || (face==GL_FRONT_AND_BACK))
-            gl4es_glStencilMask(mask);
-        else
-            noerrorShim();
-    }
-}
-void glStencilMaskSeparate(GLenum face, GLuint mask) AliasExport("gl4es_glStencilMaskSeparate");
-
-void gl4es_glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask) {
-    LOAD_GLES2(glStencilFuncSeparate);
-    errorGL();
-    if(gles_glStencilFuncSeparate) {
-        gles_glStencilFuncSeparate(face, func, ref, mask);
-    } else {
-        // fake function..., call it only for front or front_and_back, just ignore back (crappy, I know)
-        if ((face==GL_FRONT) || (face==GL_FRONT_AND_BACK))
-            gl4es_glStencilFunc(func, ref, mask);
-        else
-            noerrorShim();
-    }
-}
-void glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask) AliasExport("gl4es_glStencilFuncSeparate");
-
-void gl4es_glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
-    LOAD_GLES2(glStencilOpSeparate);
-    errorGL();
-    if(gles_glStencilOpSeparate) {
-        gles_glStencilOpSeparate(face, sfail, dpfail, dppass);
-    } else {
-        //fake, again
-        if ((face==GL_FRONT) || (face==GL_FRONT_AND_BACK))
-            gl4es_glStencilOp(sfail, dpfail, dppass);
-        else
-            noerrorShim();
-    }
-}
-void glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) AliasExport("gl4es_glStencilOpSeparate");
-
 void flush() {
     // flush internal list
     renderlist_t *mylist = glstate->list.active?extend_renderlist(glstate->list.active):NULL;
@@ -1072,8 +1041,13 @@ void gl4es_use_scratch_indices(int use) {
     gles_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, use?glstate->scratch_indices:0);
 }
 
+#if defined(AMIGAOS4) || (defined(NOX11) && defined(NOEGL))
 #ifdef AMIGAOS4
-void amiga_pre_swap() {
+void amiga_pre_swap()
+#else
+__attribute__((visibility("default"))) void gl4es_pre_swap()
+#endif
+{
     if (glstate->list.active){
         flush();
     }
@@ -1087,11 +1061,46 @@ void amiga_pre_swap() {
     }
 }
 
-void amiga_post_swap() {
+#ifdef AMIGAOS4
+void amiga_post_swap()
+#else
+__attribute__((visibility("default"))) void gl4es_post_swap()
+#endif
+{
+    if (globals4es.showfps) 
+    {
+        // framerate counter
+        static float avg, fps = 0;
+        static int frame1, last_frame, frame, now, current_frames;
+        struct timeval out;
+        gettimeofday(&out, NULL);
+        now = out.tv_sec;
+        frame++;
+        current_frames++;
+
+        if (frame == 1) {
+            frame1 = now;
+        } else if (frame1 < now) {
+            if (last_frame < now) {
+                float change = current_frames / (float)(now - last_frame);
+                float weight = 0.7;
+                if (! fps) {
+                    fps = change;
+                } else {
+                    fps = (1 - weight) * fps + weight * change;
+                }
+                current_frames = 0;
+
+                avg = frame / (float)(now - frame1);
+                printf("LIBGL: fps: %.2f, avg: %.2f\n", fps, avg);
+            }
+        }
+        last_frame = now;
+    }
+
     // If drawing in fbo, rebind it...
     if (globals4es.usefbo) {
         bindMainFBO();
     }
-
 }
 #endif

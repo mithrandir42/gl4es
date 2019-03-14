@@ -1,8 +1,9 @@
-#include "gl.h"
-#include "buffers.h"
+#ifndef _GL4ES_TEXTURE_H_
+#define _GL4ES_TEXTURE_H_
 
-#ifndef GL_TEXTURE_H
-#define GL_TEXTURE_H
+#include "buffers.h"
+#include "const.h"
+#include "gles.h"
 
 void gl4es_glTexImage2D(GLenum target, GLint level, GLint internalFormat,
                   GLsizei width, GLsizei height, GLint border,
@@ -138,7 +139,7 @@ typedef struct {
     GLvoid *data;	// in case we want to keep a copy of it (it that case, always RGBA/GL_UNSIGNED_BYTE
 } gltexture_t;
 
-KHASH_MAP_INIT_INT(tex, gltexture_t *)
+KHASH_MAP_DECLARE_INT(tex, gltexture_t *);
 
 static inline GLenum map_tex_target(GLenum target) {
     switch (target) {
@@ -220,8 +221,13 @@ GLboolean gl4es_glIsTexture( GLuint texture );
 int  tex_setup_needchange(GLuint itarget);
 void tex_setup_texcoord(GLuint len, int changes, GLuint texture, pointer_state_t* ptr);
 
+int wrap_npot(GLenum wrap);
+int minmag_npot(GLenum mag);
+GLenum minmag_forcenpot(GLenum filt);
+GLenum minmag_float(GLenum filt);
+
 void realize_bound(int TMU, GLenum target);
 void realize_textures();
 void realize_active();
 
-#endif
+#endif // _GL4ES_TEXTURE_H_

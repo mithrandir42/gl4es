@@ -1,7 +1,9 @@
-#include "gl.h"
+#ifndef _GL4ES_BUFFERS_H_
+#define _GL4ES_BUFFERS_H_
 
-#ifndef GL_BUFFERS_H
-#define GL_BUFFERS_H
+#include "khash.h"
+#include "../config.h"
+#include "gles.h"
 
 // VBO *****************
 typedef struct {
@@ -14,7 +16,7 @@ typedef struct {
     GLvoid     *data;
 } glbuffer_t;
 
-KHASH_MAP_INIT_INT(buff, glbuffer_t *)
+KHASH_MAP_DECLARE_INT(buff, glbuffer_t *);
 
 void gl4es_glGenBuffers(GLsizei n, GLuint * buffers);
 void gl4es_glBindBuffer(GLenum target, GLuint buffer);
@@ -29,6 +31,9 @@ GLboolean gl4es_glUnmapBuffer(GLenum target);
 void gl4es_glGetBufferPointerv(GLenum target, GLenum pname, GLvoid ** params);
 void gl4es_glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, GLvoid * data);
 
+void *gl4es_glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+void gl4es_glFlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr length);
+
 void glGenBuffers(GLsizei n, GLuint * buffers);
 void glBindBuffer(GLenum target, GLuint buffer);
 void glBufferData(GLenum target, GLsizeiptr size, const GLvoid * data, GLenum usage);
@@ -40,6 +45,9 @@ void *glMapBuffer(GLenum target, GLenum access);
 GLboolean glUnmapBuffer(GLenum target);
 void glGetBufferPointerv(GLenum target, GLenum pname, GLvoid ** params);
 void glGetBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, GLvoid * data);
+
+void *glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
+void glFlushMappedBufferRange(GLenum target, GLintptr offset, GLsizeiptr length);
 
 void glGenBuffersARB(GLsizei n, GLuint * buffers);
 void glBindBufferARB(GLenum target, GLuint buffer);
@@ -92,12 +100,12 @@ typedef struct {
 typedef struct {
     GLint           size;
     GLenum          type;
-    GLboolean       normalized;
     GLsizei         stride;
     const GLvoid*   pointer;
+    GLboolean       vaarray;
+    GLboolean       normalized;
     glbuffer_t      *buffer;    // reference buffer
     GLfloat         current[4];
-    GLboolean       vaarray;
     GLint           divisor;
 } vertexattrib_t;
 
@@ -136,7 +144,7 @@ typedef struct {
 void VaoSharedClear(glvao_t *vao);
 void VaoInit(glvao_t *vao);
 
-KHASH_MAP_INIT_INT(glvao, glvao_t*)
+KHASH_MAP_DECLARE_INT(glvao, glvao_t*);
 
 void gl4es_glGenVertexArrays(GLsizei n, GLuint *arrays);
 void gl4es_glBindVertexArray(GLuint array);
@@ -147,4 +155,5 @@ void glGenVertexArrays(GLsizei n, GLuint *arrays);
 void glBindVertexArray(GLuint array);
 void glDeleteVertexArrays(GLsizei n, const GLuint *arrays);
 GLboolean glIsVertexArray(GLuint array);
-#endif
+
+#endif // _GL4ES_BUFFERS_H_

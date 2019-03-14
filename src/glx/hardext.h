@@ -25,10 +25,14 @@ typedef struct _hardext {
     int multidraw;      // GL_EXT_multi_draw_arrays
     int bgra8888;       // GL_EXT_texture_format_BGRA8888
     int depthtex;       // GL_OES_depth_texture
+    int stenciltex;     // GL_OES_texture_stencil8
     int cubemap;        // GL_OES_texture_cube_map
     int drawtex;        // GL_OES_draw_texture
     int rgtex;          // GL_EXT_texture_rg
     int floattex;       // GL_OES_texture_float
+    int halffloattex;   // GL_OES_texture_half_float
+    int floatfbo;       // GL_EXT_color_buffer_float
+    int halffloatfbo;   // GL_EXT_color_buffer_half_float
     int mirrored;       // GL_OES_texture_mirrored_repeat
     int aniso;          // Max ANISOTROPIC filter available (0 if not)
     int srgb;           // EGL_KHR_gl_colorspace
@@ -41,6 +45,7 @@ typedef struct _hardext {
     int highp;          // GL_OES_fragment_precision_high
     int fragdepth;      // GL_EXT_frag_depth
     int derivatives;    // GL_OES_standard_derivatives
+    int gbm;            // EGL_KHR_platform_gbm
     int vendor;         // which vendor (to apply workaround)
     int eglnoalpha;     // EGL surface doesn't seems to have any alpha channel (auto detect)
 } hardext_t;

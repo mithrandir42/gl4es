@@ -1,9 +1,8 @@
-#ifndef GL_ARRAY_H
-#define GL_ARRAY_H
-
-#include "gles.h"
+#ifndef _GL4ES_ARRAY_H_
+#define _GL4ES_ARRAY_H_
 
 #include "buffers.h"
+#include "gles.h"
 
 GLvoid *copy_gl_array(const GLvoid *src,
                       GLenum from, GLsizei width, GLsizei stride,
@@ -15,7 +14,7 @@ GLvoid *copy_gl_array_convert(const GLvoid *src,
 	
 GLvoid *copy_gl_pointer(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
 GLvoid *copy_gl_pointer_color(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
-GLvoid *copy_gl_pointer_color_bgra(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
+GLvoid *copy_gl_pointer_color_bgra(const void *ptr, GLint stride, GLsizei width, GLsizei skip, GLsizei count);
 GLvoid *copy_gl_pointer_bytecolor(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
 GLvoid *copy_gl_pointer_raw(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
 GLvoid *copy_gl_pointer_tex(pointer_state_t *ptr, GLsizei width, GLsizei skip, GLsizei count);
@@ -30,4 +29,5 @@ GLfloat *copy_eval_double1(GLenum target, GLint ustride, GLint uorder, const GLd
 GLfloat *copy_eval_float1(GLenum target, GLint ustride, GLint uorder, const GLfloat *points);
 GLfloat *copy_eval_double2(GLenum target, GLint ustride, GLint uorder, GLint vstride, GLint vorder, const GLdouble *points);
 GLfloat *copy_eval_float2(GLenum target, GLint ustride, GLint uorder, GLint vstride, GLint vorder, const GLfloat *points);
-#endif
+
+#endif // _GL4ES_ARRAY_H_

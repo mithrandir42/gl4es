@@ -1,7 +1,13 @@
-#ifndef _GL_STATE_H_
-#define _GL_STATE_H_
+#ifndef _GL4ES_GLSTATE_H_
+#define _GL4ES_GLSTATE_H_
 
+#include "fog.h"
+#include "fpe.h"
+#include "light.h"
+#include "pointsprite.h"
+#include "queries.h"
 #include "stack.h"
+#include "stencil.h"
 
 typedef struct {
     int                 dummy[16];  // dummy zone, test for memory overwriting...
@@ -59,6 +65,7 @@ typedef struct {
     light_state_t       light;
     fog_t               fog;
     material_state_t    material;
+    stencil_t           stencil;
     float               planes[MAX_CLIP_PLANES][4];
     pointsprite_t       pointsprite;
     linestipple_t       linestipple;
@@ -80,6 +87,7 @@ typedef struct {
     gleshard_ns_t       glesva;
     glesblit_t          *blit;
     fbo_t               fbo;
+    int                 fbowidth, fboheight;    // initial size (usefull only on LIBGL_FB=1 or 2)
     depth_state_t       depth;
     face_state_t        face;
     GLint               instanceID;
@@ -99,10 +107,10 @@ typedef struct {
     GLsizei             scratch_vertex_size;
     GLuint              scratch_indices;
     GLsizei             scratch_indices_size;
-    // Implementatio read
+    // Implementation read
     GLenum              readf; // implementation Read Format
     GLenum              readt; // implementation Read Type
 } glstate_t;
 
 
-#endif //_GL_STATE_H_
+#endif // _GL4ES_GLSTATE_H_

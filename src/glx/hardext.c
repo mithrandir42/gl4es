@@ -1,7 +1,18 @@
-#include "../gl/gl.h"
 #include "hardext.h"
-#include "../gl/init.h"
+
 #include "../gl/debug.h"
+#include "../gl/gl4es.h"
+#include "../gl/init.h"
+#include "../gl/logs.h"
+#include "../gl/loader.h"
+#ifndef ANDROID
+#include "rpi.h"
+#endif
+#include "glx_gbm.h"
+
+#ifndef EGL_PLATFORM_GBM_KHR
+#define EGL_PLATFORM_GBM_KHR                     0x31D7
+#endif
 
 static int tested = 0;
 
@@ -9,6 +20,9 @@ hardext_t hardext;
 
 #define SHUT(a) if(!globals4es.nobanner) a
 
+#if defined(NOX11) && defined(NOEGL)
+__attribute__((visibility("default")))
+#endif
 void GetHardwareExtensions(int notest)
 {
     if(tested) return;
@@ -38,6 +52,9 @@ void GetHardwareExtensions(int notest)
         }
         return;
     }
+#if defined(BCMHOST) && !defined(ANDROID)
+    rpi_init();
+#endif
 #ifdef NOEGL
     SHUT(LOGD("LIBGL: Hardware test on current Context...\n"));
 #else
@@ -52,6 +69,7 @@ void GetHardwareExtensions(int notest)
     LOAD_EGL(eglChooseConfig);
     LOAD_EGL(eglCreateContext);
     LOAD_EGL(eglQueryString);
+    LOAD_EGL(eglTerminate);
 
     EGLDisplay eglDisplay;
     EGLSurface eglSurface;
@@ -98,12 +116,19 @@ void GetHardwareExtensions(int notest)
 
     int configsFound;
     static EGLConfig pbufConfigs[1];
-    
+
+#ifndef NO_GBM
+    if(strstr(egl_eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS), "EGL_KHR_platform_gbm")) {
+        SHUT(LOGD("LIBGL: GBM Surfaces supported%s\n", globals4es.usegbm?" and used":""));
+        hardext.gbm = 1;
+    }
+#endif
     eglDisplay = egl_eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
     egl_eglBindAPI(EGL_OPENGL_ES_API);
     if (egl_eglInitialize(eglDisplay, NULL, NULL) != EGL_TRUE) {
         LOGE("LIBGL: Error while gathering supported extension (eglInitialize: %s), default to none\n", PrintEGLError(0));
+        egl_eglTerminate(eglDisplay);
         return;
     }
 
@@ -121,6 +146,7 @@ void GetHardwareExtensions(int notest)
 #endif
     if(!configsFound) {
         SHUT(LOGE("LIBGL: Error while gathering supported extension (eglChooseConfig: %s), default to none\n", PrintEGLError(0)));
+        egl_eglTerminate(eglDisplay);
         return;
     }
     eglContext = egl_eglCreateContext(eglDisplay, pbufConfigs[0], EGL_NO_CONTEXT, (hardext.esversion==1)?egl_context_attrib:egl_context_attrib_es2);
@@ -132,6 +158,7 @@ void GetHardwareExtensions(int notest)
     if(!eglSurface) {
         SHUT(LOGE("LIBGL: Error while gathering supported extension (eglCreatePBufferSurface: %s), default to none\n", PrintEGLError(0)));
         egl_eglDestroyContext(eglDisplay, eglContext);
+        egl_eglTerminate(eglDisplay);
         return;
     }
     egl_eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext);
@@ -145,10 +172,11 @@ void GetHardwareExtensions(int notest)
     // Parse them!
     #define S(A, B, C) if(strstr(Exts, A)) { hardext.B = 1; SHUT(LOGD("LIBGL: Extension %s detected%s",A, C?" and used\n":"\n")); } 
     if(hardext.esversion>1) hardext.npot = 1;
-    if(strstr(Exts, "GL_APPLE_texture_2D_limited_npot") || strstr(Exts, "GL_IMG_texture_npot")) hardext.npot = 1;
-    if(strstr(Exts, "GL_ARB_texture_non_power_of_two ")) hardext.npot = 2;
+    if(strstr(Exts, "GL_APPLE_texture_2D_limited_npot")) hardext.npot = 1;
+    if(strstr(Exts, "GL_IMG_texture_npot")) hardext.npot = 1; // it should enable mipmap (so hardext.npot=2), but mipmap (so level > 0) needs to be POT-sized?!!
+    if(strstr(Exts, "GL_ARB_texture_non_power_of_two") || strstr(Exts, "GL_OES_texture_npot")) hardext.npot = 3;
     if(hardext.npot>0) {
-        SHUT(LOGD("LIBGL: Hardware %s NPOT detected and used\n", hardext.npot==2?"Full":"Limited"));
+        SHUT(LOGD("LIBGL: Hardware %s NPOT detected and used\n", hardext.npot==3?"Full":(hardext.npot==2?"Limited+Mipmap":"Limited")));
     }
     S("GL_EXT_blend_minmax", blendminmax, 1);
     /*if(hardext.blendcolor==0) {
@@ -198,10 +226,16 @@ void GetHardwareExtensions(int notest)
     }
     if(!globals4es.nodepthtex) {
         S("GL_OES_depth_texture", depthtex, 1);
+        S("GL_OES_texture_stencil8", stenciltex, 1);
     }
     S("GL_OES_draw_texture", drawtex, 1);
     S("GL_EXT_texture_rg", rgtex, 1);
-    S("GL_OES_texture_float", floattex, 1);
+    if(globals4es.floattex) {
+        S("GL_OES_texture_float", floattex, 1);
+        S("GL_OES_texture_half_float", halffloattex, 1);
+        S("GL_EXT_color_buffer_float", floatfbo, 1);
+        S("GL_EXT_color_buffer_half_float", halffloatfbo, 1);
+    }
 
     if (hardext.esversion>1) {
         if(!globals4es.nohighp) {
@@ -248,11 +282,14 @@ void GetHardwareExtensions(int notest)
     if(hardext.maxlights>MAX_LIGHT) hardext.maxlights=MAX_LIGHT;                // caping lights too
     if(hardext.maxplanes>MAX_CLIP_PLANES) hardext.maxplanes=MAX_CLIP_PLANES;    // caping planes, even 6 should be the max supported anyway
     SHUT(LOGD("LIBGL: Texture Units: %d(%d), Max lights: %d, Max planes: %d\n", hardext.maxtex, hardext.maxteximage, hardext.maxlights, hardext.maxplanes));
-    gles_glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &hardext.aniso);
-    if(gles_glGetError()!=GL_NO_ERROR)
-        hardext.aniso = 0;
-    if(hardext.aniso)
-        SHUT(LOGD("LIBGL: Max Anisotropic filtering: %d\n", hardext.aniso));
+    S("GL_EXT_texture_filter_anisotropic", aniso, 1);
+    if(hardext.aniso) {
+        gles_glGetIntegerv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &hardext.aniso);
+        if(gles_glGetError()!=GL_NO_ERROR)
+            hardext.aniso = 0;
+        if(hardext.aniso)
+            SHUT(LOGD("LIBGL: Max Anisotropic filtering: %d\n", hardext.aniso));
+    }
     // get GLES driver signatures...
     const char* vendor = gles_glGetString(GL_VENDOR);
     SHUT(LOGD("LIBGL: Hardware vendor is %s\n", vendor));
@@ -266,9 +303,12 @@ void GetHardwareExtensions(int notest)
         SHUT(LOGD("LIBGL: sRGB surface supported\n"));
         hardext.srgb = 1;
     }
+
     // End, cleanup
     egl_eglMakeCurrent(eglDisplay, 0, 0, EGL_NO_CONTEXT);
     egl_eglDestroySurface(eglDisplay, eglSurface);
     egl_eglDestroyContext(eglDisplay, eglContext);
+
+    egl_eglTerminate(eglDisplay);
 #endif
 }

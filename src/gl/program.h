@@ -1,8 +1,8 @@
-#include "gl.h"
+#ifndef _GL4ES_PROGRAM_H_
+#define _GL4ES_PROGRAM_H_
 
-#ifndef __PROGRAM_H_
-#define __PROGRAM_H_
-
+#include "gles.h"
+#include "buffers.h"
 #include "shader.h"
 #include "uniform.h"
 
@@ -13,7 +13,7 @@ typedef struct {
     int         size;
     char*       name;
 } attribloc_t;
-KHASH_MAP_INIT_INT(attribloclist, attribloc_t *)
+KHASH_MAP_DECLARE_INT(attribloclist, attribloc_t *);
 
 typedef enum {
     MAT_MV = 0,
@@ -77,7 +77,7 @@ typedef struct {
     int             parent_size;    // 0 means not found in parent... like for builtin
 } uniform_t;
 
-KHASH_MAP_INIT_INT(uniformlist, uniform_t *)
+KHASH_MAP_DECLARE_INT(uniformlist, uniform_t *);
 
 typedef struct {
     void*           cache;  // buffer of the uniform size
@@ -149,6 +149,23 @@ typedef struct {
     GLint       scale;
 } builtin_fog_t;
 
+// this need to be as texture_enabled_t, but with 0 as nothing
+typedef enum {
+    TU_NONE = 0,
+    TU_TEX1D,
+    TU_TEX2D,
+    TU_TEX3D,
+    TU_RECTANGLE,
+    TU_CUBE
+} texunit_type;
+
+typedef struct {
+    GLint           id;
+    texunit_type    type;
+    int             req_tu; //requested TU
+    int             act_tu; // actual (can be different from req)
+} texunit_t;
+
 typedef struct {
     GLuint          id;     // internal id of the shader
     int             linked;
@@ -196,10 +213,12 @@ typedef struct {
     GLint                           builtin_texenvalphascale[MAX_TEX];
     GLint                           builtin_texadjust[MAX_TEX];
     int                             has_builtin_texadjust;
+    texunit_t                       texunits[MAX_TEX];
     void*                           fpe_cache;  // that will be an fpe_cache_t*
 } program_t;
 
-KHASH_MAP_INIT_INT(programlist, program_t *)
+KHASH_MAP_DECLARE_INT(programlist, program_t *);
+
 void deleteProgram(program_t *glprogram, khint_t k_program);
 
 void gl4es_glAttachShader(GLuint program, GLuint shader);
@@ -253,8 +272,8 @@ void GoUniformiv(program_t *glprogram, GLint location, int size, int count, cons
 void GoUniformMatrix2fv(program_t *glprogram, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
 void GoUniformMatrix3fv(program_t *glprogram, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
 void GoUniformMatrix4fv(program_t *glprogram, GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
-
-#endif
+int GetUniformi(program_t *glprogram, GLint location);
+const char* GetUniformName(program_t *glprogram, GLint location);
 
 GLvoid glBindAttribLocationARB(GLhandleARB programObj, GLuint index, const GLcharARB *name);
 GLvoid glGetActiveAttribARB(GLhandleARB programObj, GLuint index, GLsizei maxLength, GLsizei *length, GLint *size, GLenum *type, GLcharARB *name);
@@ -292,3 +311,5 @@ GLvoid glGetActiveUniformARB(GLhandleARB programObj, GLuint index, GLsizei maxLe
 GLvoid glGetUniformfvARB(GLhandleARB programObj, GLint location, GLfloat *params);
 GLvoid glGetUniformivARB(GLhandleARB programObj, GLint location, GLint *params);
 GLvoid glGetShaderSourceARB(GLhandleARB obj, GLsizei maxLength, GLsizei *length, GLcharARB *source);
+
+#endif // _GL4ES_PROGRAM_H_

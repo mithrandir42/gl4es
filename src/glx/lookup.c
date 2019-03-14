@@ -1,10 +1,15 @@
-#ifdef ANDROID
-#include "../gl/gl.h"
-#endif
+#include "../gl/wrap/gl4es.h"
+#include "../gl/wrap/stub.h"
+#include "../gl/directstate.h"
+#include "../gl/framebuffers.h"
+#include "../gl/init.h"
+#include "../gl/line.h"
+#include "../gl/loader.h"
+#include "../gl/render.h"
+#include "../gl/texgen.h"
+#include "../gl/vertexattrib.h"
 #include "glx.h"
 #include "hardext.h"
-#include "../gl/init.h"
-#include "../gl/directstate.h"
 
 #define EXPORT __attribute__((visibility("default")))
 
@@ -139,6 +144,9 @@ void *gl4es_glXGetProcAddress(const char *name) {
     _ARB(glGetBufferParameteriv);
     _EX(glGetBufferSubData);
     _ARB(glGetBufferSubData);
+
+    _EX(glMapBufferRange);
+    _EX(glFlushMappedBufferRange);
 
     // GL_ARB_vertex_array_object
     _EX(glGenVertexArrays);
@@ -637,7 +645,14 @@ void *gl4es_glXGetProcAddress(const char *name) {
         _EX(glGetQueryObjectiv);
         _EX(glGetQueryObjectuiv);
         
+        _ARB(glGenQueries);
+        _ARB(glIsQuery);
+        _ARB(glDeleteQueries);
+        _ARB(glBeginQuery);
+        _ARB(glEndQuery);
+        _ARB(glGetQueryiv);
         _ARB(glGetQueryObjectiv);
+        _ARB(glGetQueryObjectuiv);
     }
 
     // GL_ARB_multisample
@@ -868,7 +883,7 @@ void *gl4es_glXGetProcAddress(const char *name) {
     return NULL;
 }
 #ifdef AMIGAOS4
-void aglGetProcAddress(const char* name) AliasExport("gl4es_glXGetProcAddress");
+void* aglGetProcAddress(const char* name) AliasExport("gl4es_glXGetProcAddress");
 #else
 void* glXGetProcAddress(const char* name) AliasExport("gl4es_glXGetProcAddress");
 void* glXGetProcAddressARB(const char* name) AliasExport("gl4es_glXGetProcAddress");
